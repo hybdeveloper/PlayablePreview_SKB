@@ -794,6 +794,11 @@
         return;
       }
       if (e.status === 401) { state.gh = null; store.set('gh', null); renderEditUI(); }
+      if (e.status === 403 && /personal access token/i.test(e.message)) {
+        errorEl.textContent = 'The edit token cannot write to this repo. Create it from the repo owner’s account (fine-grained, Contents: Read and write) or use a classic token with the public_repo / repo scope.';
+        btn.disabled = false;
+        return;
+      }
       errorEl.textContent = e.message;
       btn.disabled = false;
     }
