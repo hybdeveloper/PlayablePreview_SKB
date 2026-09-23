@@ -39,3 +39,10 @@ if (cfg) {
   console.log('Access control OFF (no PREVIEW_ACCESS / access.config.json): everything is public');
   console.log(`Built ${manifest.count} playable(s) -> ${path.relative(ROOT, OUT) || OUT}`);
 }
+
+// Surface the access mode on the GitHub Actions run page (never prints passwords).
+if (process.env.GITHUB_ACTIONS) {
+  console.log(cfg
+    ? `::notice title=Access control ON::${cfg.users.length} password(s); public folders: ${cfg.public.join(', ') || 'none'}`
+    : '::warning title=Access control OFF::Secret PREVIEW_ACCESS is empty or not visible to this workflow - the site is public.');
+}
