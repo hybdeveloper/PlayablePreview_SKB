@@ -583,7 +583,8 @@
   const JUNK = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
   const isEditing = () => !!(state.gh && state.manifest && state.manifest.repo);
   const repoPath = p => [state.manifest.repo.games, p].filter(Boolean).join('/');
-  const byline = () => (state.user ? ` (by ${state.user} via Playable Preview)` : ' (via Playable Preview)');
+  // [skip ci]: web edits don't rebuild the site; the Publish button does.
+  const byline = () => (state.user ? ` (by ${state.user} via Playable Preview)` : ' (via Playable Preview)') + '\n\n[skip ci]';
 
   function moreBtn(node) {
     return isEditing() && node.path
@@ -760,10 +761,36 @@
     b.hidden = !html;
   }
 
-  // The commit triggers a redeploy; poll manifest.json until the new build is live.
-  function awaitDeploy(msg) {
+  // Web edits are committed with [skip ci]; they go live when someone presses Publish.
+  async function checkPending() {
+    if (!isEditing()) return;
+    try {
+      const { count } = await PPGitHub.unpublished(state.gh.token, state.manifest.repo);
+      if (!count) return banner('');
+      banner(`${icon('upload')}<span><b>${count} change${count > 1 ? 's' : ''} not published yet.</b> Saved on GitHub; the site still shows the previous version until you publish.</span>
+        <button class="pill-btn primary" data-act="publish">Publish</button>`, 'pending');
+    } catch { /* offline or no access: nothing to show */ }
+  }
+
+  async function publish(btn) {
+    btn.disabled = true;
+    try {
+      await PPGitHub.publish(state.gh.token, state.manifest.repo);
+      awaitDeploy();
+    } catch (e) {
+      btn.disabled = false;
+      const hint = e.status === 403 || e.status === 404
+        ? ' — the edit token also needs permission to run workflows (fine-grained: Actions “Read and write”; classic: repo scope).'
+        : '';
+      toast('Publish failed: ' + e.message + hint);
+      banner(`${icon('warn')}<span>Publish failed: ${esc(e.message + hint)}</span><button class="pill-btn primary" data-act="publish">Retry</button>`, 'warn');
+    }
+  }
+
+  // Poll manifest.json until the new build is live.
+  function awaitDeploy() {
     const since = state.manifest.generatedAt;
-    banner(`<span class="spinner"></span><span><b>Committed:</b> ${esc(msg)}. Rebuilding the site (about 1 minute)…</span>`, 'busy');
+    banner(`<span class="spinner"></span><span><b>Publishing…</b> Building and deploying the site (about 1–2 minutes).</span>`, 'busy');
     let tries = 0;
     const tick = async () => {
       tries++;
@@ -786,7 +813,7 @@
     try {
       const msg = await fn();
       closeModal();
-      if (msg) { toast('Saved to GitHub'); awaitDeploy(msg); }
+      if (msg) { toast('Saved: ' + msg); checkPending(); }
     } catch (e) {
       if (e.status === 401 && state.gh.fromLogin) {
         errorEl.textContent = 'The shared edit token is invalid or expired — ask the admin to update PREVIEW_EDIT_TOKEN.';
@@ -882,7 +909,11 @@
         runAction($('#renameBtn'), $('#renameError'), () => doRename(node, $('#renameInput').value));
       }
     });
-    $('#banner').addEventListener('click', e => { if (e.target.closest('[data-act="reload"]')) location.reload(); });
+    $('#banner').addEventListener('click', e => {
+      if (e.target.closest('[data-act="reload"]')) location.reload();
+      const p = e.target.closest('[data-act="publish"]');
+      if (p) publish(p);
+    });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeMenu(); if (!$('#modal').hidden) closeModal(); } }, true);
   }
 
@@ -1013,6 +1044,7 @@
     state.manifest = manifest;
     indexTree(state.manifest.root);
     render();
+    checkPending();
   }
 
   init();

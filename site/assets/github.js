@@ -99,5 +99,23 @@
     });
   }
 
-  root.PPGitHub = { checkAccess, upload, move };
+  // Commits on the branch that the published build (repo.commit) does not have yet.
+  async function unpublished(token, repo) {
+    const R = base(repo);
+    const ref = await call(token, 'GET', `${R}/git/ref/heads/${enc(repo.branch)}`);
+    if (!repo.commit || ref.object.sha === repo.commit) return { count: 0, head: ref.object.sha };
+    try {
+      const c = await call(token, 'GET', `${R}/compare/${repo.commit}...${ref.object.sha}`);
+      return { count: c.ahead_by, head: ref.object.sha };
+    } catch {
+      return { count: 1, head: ref.object.sha };
+    }
+  }
+
+  // Runs the deploy workflow (workflow_dispatch) on the branch.
+  function publish(token, repo) {
+    return call(token, 'POST', `${base(repo)}/actions/workflows/${encodeURIComponent(repo.workflow || 'deploy.yml')}/dispatches`, { ref: repo.branch });
+  }
+
+  root.PPGitHub = { checkAccess, upload, move, unpublished, publish };
 })(self);

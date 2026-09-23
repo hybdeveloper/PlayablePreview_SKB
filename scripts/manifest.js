@@ -57,7 +57,8 @@ function repoInfo(dir) {
     const [owner, name] = full.split('/');
     const branch = process.env.GITHUB_REF_NAME || git(['rev-parse', '--abbrev-ref', 'HEAD']);
     const games = toPosix(path.relative(git(['rev-parse', '--show-toplevel']), dir));
-    return { owner, name, branch, games };
+    const commit = process.env.GITHUB_SHA || git(['rev-parse', 'HEAD']); // what this build contains
+    return { owner, name, branch, games, commit, workflow: 'deploy.yml' };
   } catch {
     return null;
   }

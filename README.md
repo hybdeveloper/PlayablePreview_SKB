@@ -59,7 +59,8 @@ Quyền sửa gắn với **mật khẩu đăng nhập**: thêm `"edit": true` c
 **Admin làm 1 lần** (GitHub bắt buộc có chìa khoá để ghi vào repo):
 1. https://github.com/settings/personal-access-tokens/new → *Fine-grained token* (Expiration: chọn dài nhất / No expiration)
 2. *Repository access*: Only select repositories → chọn repo này
-3. *Permissions → Contents*: **Read and write** → Generate → copy token
+3. *Permissions*: **Contents: Read and write** và **Actions: Read and write** (để bấm Publish) → Generate → copy token
+   (hoặc classic token với scope `repo`; fine-grained phải tạo từ tài khoản chủ repo)
 4. Repo → *Settings → Secrets and variables → Actions* → secret mới tên **`PREVIEW_EDIT_TOKEN`** → dán token → chạy lại workflow
 
 Token được **mã hoá bằng mật khẩu** của từng người có `"edit": true`; người chỉ xem không giải mã được. Dùng mật khẩu đủ mạnh cho tài khoản sửa.
@@ -68,7 +69,7 @@ Khi đã đăng nhập bằng tài khoản sửa (góc phải có nhãn **Editor
 - **Đổi tên**: nút ⋮ trên từng game/thư mục → *Rename*. Game 1 file sẽ đổi tên luôn thumbnail cùng tên.
 - **Upload**: vào thư mục → *Upload files* / *Upload folder*, hoặc kéo-thả file/thư mục vào trang.
 
-Mỗi thao tác = 1 commit (ghi rõ tên người sửa) → web tự deploy lại sau ~1 phút, trang hiện thông báo khi xong.
+Mỗi thao tác = 1 commit (ghi rõ tên người sửa, kèm `[skip ci]` nên **không tự build**). Trang hiện thanh *"N changes not published yet"* → bấm **Publish** khi muốn đưa lên web (build + deploy ~1–2 phút). Push bằng git thường thì vẫn tự deploy như cũ.
 Trang Actions sẽ báo `editors: ...` và cảnh báo nếu có người `"edit": true` mà chưa có `PREVIEW_EDIT_TOKEN`.
 
 ## Mật khẩu & phân quyền thư mục
