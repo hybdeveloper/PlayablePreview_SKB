@@ -43,6 +43,26 @@ function gitDates(dir) {
   return dates;
 }
 
+// GitHub repo the site is built from, so the page's edit mode (rename/upload)
+// knows where to commit. Null for non-GitHub remotes.
+function repoInfo(dir) {
+  try {
+    const git = args => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    let full = process.env.GITHUB_REPOSITORY;
+    if (!full) {
+      const m = git(['config', '--get', 'remote.origin.url']).match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?\/?$/);
+      if (!m) return null;
+      full = `${m[1]}/${m[2]}`;
+    }
+    const [owner, name] = full.split('/');
+    const branch = process.env.GITHUB_REF_NAME || git(['rev-parse', '--abbrev-ref', 'HEAD']);
+    const games = toPosix(path.relative(git(['rev-parse', '--show-toplevel']), dir));
+    return { owner, name, branch, games };
+  } catch {
+    return null;
+  }
+}
+
 function buildManifest(gamesDir) {
   const root = path.resolve(gamesDir);
   const dates = gitDates(root);
@@ -117,7 +137,7 @@ function buildManifest(gamesDir) {
 
   if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
   const tree = folder(root, '', 'Playables');
-  return { generatedAt: Date.now(), count, root: tree };
+  return { generatedAt: Date.now(), count, root: tree, repo: repoInfo(root) };
 }
 
 module.exports = { buildManifest, isHidden };

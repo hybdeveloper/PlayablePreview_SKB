@@ -116,14 +116,14 @@ function writeProtected({ cfg, manifest, gamesDir, outDir }) {
 
   const publicVisible = p => isUnder(p, cfg.public);
   const publicRoot = prune(manifest.root, publicVisible) || { ...manifest.root, children: [] };
-  fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({ generatedAt: manifest.generatedAt, count: countGames(publicRoot), root: publicRoot }));
+  fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({ generatedAt: manifest.generatedAt, count: countGames(publicRoot), root: publicRoot, repo: manifest.repo }));
 
   const salt = crypto.createHash('sha256').update(cfg.salt).digest();
   const entries = cfg.users.map(u => {
     const root = prune(manifest.root, p => publicVisible(p) || isUnder(p, u.folders)) || { ...manifest.root, children: [] };
     const userKeys = Object.fromEntries(scopes.filter(s => isUnder(s, u.folders))
       .map(s => [s, { e: keys[s].e.toString('base64'), m: keys[s].m.toString('base64') }]));
-    const payload = { name: u.name, manifest: { generatedAt: manifest.generatedAt, count: countGames(root), root }, keys: userKeys };
+    const payload = { name: u.name, manifest: { generatedAt: manifest.generatedAt, count: countGames(root), root, repo: manifest.repo }, keys: userKeys };
     const key = crypto.pbkdf2Sync(u.password, salt, ITERATIONS, 32, 'sha256');
     const { iv, ct } = encrypt(key, Buffer.from(JSON.stringify(payload)));
     console.log(`  - ${u.name}: ${u.folders.map(f => f || '*').join(', ')} (${payload.manifest.count} playables)`);

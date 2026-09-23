@@ -52,6 +52,20 @@ Mở http://localhost:5173 . Thêm/sửa game rồi **F5** là thấy ngay.
 
 > Cả hai CI đều clone full history để cột **Modified** hiển thị đúng ngày commit cuối của từng game.
 
+## Đổi tên & upload ngay trên web (Edit mode)
+
+Bấm nút ✏️ cạnh ô tìm kiếm → dán **GitHub token** có quyền ghi repo (làm 1 lần trên mỗi máy):
+1. https://github.com/settings/personal-access-tokens/new → *Fine-grained token*
+2. *Repository access*: Only select repositories → chọn repo này
+3. *Permissions → Contents*: **Read and write** → Generate → copy token
+
+Sau đó:
+- **Đổi tên**: nút ⋮ trên từng game/thư mục → *Rename*. Game 1 file sẽ đổi tên luôn thumbnail cùng tên.
+- **Upload**: vào thư mục → *Upload files* / *Upload folder*, hoặc kéo-thả file/thư mục vào trang.
+
+Mỗi thao tác = 1 commit lên nhánh `main` (người commit là chủ token) → web tự deploy lại sau ~1 phút, trang hiện thông báo khi xong.
+Token chỉ lưu trong trình duyệt của máy đó; ai không có quyền ghi repo thì không sửa được, kể cả khi biết mật khẩu xem.
+
 ## Mật khẩu & phân quyền thư mục
 
 Mỗi mật khẩu được xem một số thư mục nhất định. Khi đã bật, file game private được **mã hoá AES-256** lúc build (tên file cũng bị thay bằng mã băm), nên tải trộm về cũng không đọc được.
@@ -92,7 +106,7 @@ Muốn thử bản có mật khẩu trên máy: tạo file `access.config.json` 
 - Khung thiết bị: iPhone 15, iPhone SE, Pixel 7, Galaxy S23, iPad; tự co giãn cho vừa màn hình
 - Xoay dọc/ngang (`O`), reload (`R`), toàn màn hình, mở file gốc, copy link, `Esc` để quay lại
 - **Giả lập MRAID 3.0** (bật/tắt được): `ready`, `stateChange`, `viewableChange`, `sizeChange`, `mraid.open()`...
-  Bấm CTA sẽ hiện thông báo + ghi vào log thay vì mở store. Cũng bắt `window.open` và `ExitApi.exit()`.
+  Bấm CTA sẽ **mở link store thật** ở tab mới (tắt được bằng "Open CTA store links") + ghi vào log. Cũng bắt `window.open` và `ExitApi.exit()`.
 - **Event log**: CTA, lời gọi MRAID, lỗi JS, file asset không tải được, `console.error/warn`
 - **AppLovin checks**: ≤ 5 MB, là file HTML đơn, có gọi `mraid.open()`, không load resource từ URL ngoài
 - **QR code** để quét bằng điện thoại và chơi toàn màn hình

@@ -39,6 +39,10 @@
     empty: 'M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z',
     lock: 'M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z',
     logout: 'M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z',
+    edit: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
+    upload: 'M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z',
+    folderUp: 'M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-8 3 4 4h-3v4h-2v-4H8l4-4z',
+    more: 'M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[name]}"/></svg>`;
   const htmlIcon = `<svg class="i file-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3" fill="#e8710a"/><path fill="#fff" transform="translate(4.8 4.8) scale(.6)" d="M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0 4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>`;
@@ -106,6 +110,9 @@
     protected: false,
     access: null,
     user: null,
+    gh: store.get('gh', null),    // { token, login } for edit mode
+    openCta: store.get('openCta', true),
+    pendingUpload: null,
   };
 
   function indexTree(node) {
@@ -222,6 +229,7 @@
     if (sorted) items = sortItems(items);
 
     $('#crumbs').innerHTML = crumbs;
+    renderEditUI();
     document.querySelectorAll('#viewToggle button').forEach(b => b.classList.toggle('on', b.dataset.view === state.view));
     $('#sortKey').value = state.sort.key;
     $('#sortKey').disabled = $('#sortDir').disabled = !sorted;
@@ -244,13 +252,13 @@
       html += `<h2 class="section-title">Folders</h2><div class="folder-grid">${folders.map(f => {
         const n = countGames(f);
         return `<a class="folder-card" href="${href.folder(f.path)}" title="${esc(f.path)}">
-          ${icon('folder', 'folder-ic')}<span class="fc-name">${esc(f.name)}</span><span class="fc-meta">${n}</span></a>`;
+          ${icon('folder', 'folder-ic')}<span class="fc-name">${esc(f.name)}</span><span class="fc-meta">${n}</span>${moreBtn(f)}</a>`;
       }).join('')}</div>`;
     }
     if (games.length) {
       html += `<h2 class="section-title">Playables</h2><div class="game-grid">${games.map(g => `
         <a class="game-card" href="${href.play(g.path)}" title="${esc(g.path)}">
-          <div class="thumb">${thumbHTML(g)}<span class="play-badge">${icon('play')}</span>
+          <div class="thumb">${thumbHTML(g)}<span class="play-badge">${icon('play')}</span>${moreBtn(g)}
             ${g.kind === 'folder' ? '<span class="kind-badge">folder</span>' : ''}</div>
           <div class="gc-foot">${htmlIcon}<div class="gc-text"><span class="gc-name">${esc(g.title)}</span>
             <span class="gc-meta">${withLocation ? esc(parentPath(g.path) || state.manifest.root.name) : `${fmtSize(g.size)} · ${fmtDate(g.modified)}`}</span></div></div>
@@ -270,7 +278,7 @@
         const loc = parentPath(n.path);
         return `<a class="list-row" href="${isFolder ? href.folder(n.path) : href.play(n.path)}" title="${esc(n.path)}">
           <span class="lr-name">${isFolder ? icon('folder', 'folder-ic') : htmlIcon}<span>${esc(isFolder ? n.name : n.title)}</span>
-            ${!isFolder && n.kind === 'folder' ? '<em class="tag">folder</em>' : ''}</span>
+            ${!isFolder && n.kind === 'folder' ? '<em class="tag">folder</em>' : ''}</span>${moreBtn(n)}
           ${withLocation ? `<span class="lr-loc">${icon('folder', 'folder-ic sm')}${esc(loc || state.manifest.root.name)}</span>` : ''}
           <span class="lr-date">${fmtDate(n.modified)}</span>
           <span class="lr-size">${isFolder ? countGames(n) + ' items' : fmtSize(n.size)}</span>
@@ -413,7 +421,7 @@
     if (!d || d.__pp !== 1) return;
     log(d.type, d.detail);
     if (d.type === 'cta') {
-      toast('CTA clicked → ' + d.detail);
+      toast((state.openCta ? 'CTA → opening ' : 'CTA clicked → ') + d.detail);
       els.device.classList.remove('cta-flash');
       void els.device.offsetWidth;
       els.device.classList.add('cta-flash');
@@ -461,6 +469,7 @@
     document.querySelectorAll('#orient button').forEach(b => b.classList.toggle('on', (b.dataset.orient === 'landscape') === state.landscape));
     $('#optInject').checked = state.inject;
     $('#optFrame').checked = state.showFrame;
+    $('#optCta').checked = state.openCta;
   }
 
   function rotate() {
@@ -548,6 +557,7 @@
     });
     $('#optInject').addEventListener('change', e => { state.inject = e.target.checked; store.set('inject', state.inject); loadGame(); });
     $('#optFrame').addEventListener('change', e => { state.showFrame = e.target.checked; store.set('frame', state.showFrame); layout(); });
+    $('#optCta').addEventListener('change', e => { state.openCta = window.PP_OPEN_CTA = e.target.checked; store.set('openCta', state.openCta); });
     $('#logClear').addEventListener('click', () => { els.log.innerHTML = ''; });
 
     new ResizeObserver(() => layout()).observe(els.stage);
@@ -565,6 +575,295 @@
         search.focus();
       }
     });
+  }
+
+  /* ---------- edit mode (rename / upload via the GitHub API) ---------- */
+
+  const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // GitHub's per-file limit
+  const JUNK = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
+  const isEditing = () => !!(state.gh && state.manifest && state.manifest.repo);
+  const repoPath = p => [state.manifest.repo.games, p].filter(Boolean).join('/');
+
+  function moreBtn(node) {
+    return isEditing() && node.path
+      ? `<button class="more-btn" data-menu="${esc(node.path)}" data-type="${node.type}" aria-label="More actions">${icon('more')}</button>`
+      : '';
+  }
+
+  function renderEditUI() {
+    const repo = state.manifest && state.manifest.repo;
+    $('#editBtn').hidden = !repo;
+    $('#editBtn').classList.toggle('on', isEditing());
+    $('#editActions').hidden = !isEditing() || state.route.name !== 'folder' || !!state.query.trim();
+    document.body.classList.toggle('editing', isEditing());
+  }
+
+  function modal(html) {
+    $('#modalCard').innerHTML = html;
+    $('#modal').hidden = false;
+    const first = $('#modalCard input:not([type=hidden])');
+    if (first) setTimeout(() => { first.focus(); first.select && first.select(); }, 0);
+  }
+  const closeModal = () => { $('#modal').hidden = true; $('#modalCard').innerHTML = ''; };
+
+  function openConnect() {
+    const r = state.manifest.repo;
+    const repoName = `${r.owner}/${r.name}`;
+    if (state.gh) {
+      modal(`<h2>${icon('edit')}Edit mode</h2>
+        <p>Connected as <b>@${esc(state.gh.login || 'unknown')}</b> to <b>${esc(repoName)}</b> (branch <code>${esc(r.branch)}</code>).</p>
+        <p class="muted">Use the ⋮ button on any item to rename it, or the upload buttons in a folder. Each change is one commit; the site redeploys in about a minute.</p>
+        <div class="modal-actions"><button class="pill-btn" data-act="disconnect">Disconnect</button><button class="pill-btn primary" data-act="close">Done</button></div>`);
+      return;
+    }
+    modal(`<h2>${icon('edit')}Connect GitHub to edit</h2>
+      <p>Renaming and uploading commit straight to <b>${esc(repoName)}</b>. Paste a GitHub token that can write to this repository:</p>
+      <ol class="steps">
+        <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → Fine-grained tokens → Generate new token</a></li>
+        <li><b>Repository access</b>: Only select repositories → <code>${esc(repoName)}</code></li>
+        <li><b>Permissions → Contents</b>: Read and write → Generate, then copy the token</li>
+      </ol>
+      <form id="connectForm">
+        <input type="password" id="ghToken" placeholder="github_pat_…" autocomplete="off" required>
+        <div class="form-error" id="connectError"></div>
+        <div class="modal-actions"><button type="button" class="pill-btn" data-act="close">Cancel</button><button class="pill-btn primary" id="connectBtn">Connect</button></div>
+      </form>
+      <p class="muted small">The token is stored only in this browser and sent only to api.github.com.</p>`);
+  }
+
+  async function connect(token) {
+    const { canPush, login } = await PPGitHub.checkAccess(token, state.manifest.repo);
+    if (!canPush) throw new Error('This token cannot write to the repository');
+    state.gh = { token, login };
+    store.set('gh', state.gh);
+  }
+
+  function openMenu(btn) {
+    const node = btn.dataset.type === 'folder' ? state.folders.get(btn.dataset.menu) : state.games.get(btn.dataset.menu);
+    if (!node) return;
+    const menu = $('#menu');
+    menu.innerHTML = `<button data-act="rename">${icon('edit')}Rename</button>
+      <button data-act="copy">${icon('link')}Copy link</button>`;
+    menu.dataset.path = node.path;
+    menu.dataset.type = node.type;
+    menu.hidden = false;
+    const r = btn.getBoundingClientRect();
+    menu.style.top = Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - 8) + 'px';
+    menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8)) + 'px';
+  }
+  const closeMenu = () => { $('#menu').hidden = true; };
+
+  function splitExt(name) {
+    const i = name.lastIndexOf('.');
+    return i > 0 ? [name.slice(0, i), name.slice(i)] : [name, ''];
+  }
+
+  function openRename(node) {
+    const isFile = node.type === 'game' && node.kind === 'file';
+    const [base, ext] = isFile ? splitExt(node.name) : [node.name, ''];
+    modal(`<h2>${icon('edit')}Rename</h2>
+      <form id="renameForm" data-path="${esc(node.path)}" data-type="${node.type}">
+        <div class="input-row"><input id="renameInput" value="${esc(base)}" required>${ext ? `<span class="ext">${esc(ext)}</span>` : ''}</div>
+        <div class="form-error" id="renameError"></div>
+        ${state.protected && node.type === 'folder' ? '<p class="muted small">If this folder is listed in the PREVIEW_ACCESS secret, update the secret with the new name too.</p>' : ''}
+        <div class="modal-actions"><button type="button" class="pill-btn" data-act="close">Cancel</button><button class="pill-btn primary" id="renameBtn">Rename</button></div>
+      </form>`);
+  }
+
+  async function doRename(node, newBase) {
+    newBase = newBase.trim();
+    if (!newBase || /[\\/:*?"<>|]/.test(newBase) || newBase === '.' || newBase === '..') throw new Error('Name cannot be empty or contain \\ / : * ? " < > |');
+    const isFile = node.type === 'game' && node.kind === 'file';
+    const [oldBase, ext] = isFile ? splitExt(node.name) : [node.name, ''];
+    const newName = newBase + ext;
+    if (newName === node.name) return null;
+    const dir = parentPath(node.path);
+    const sibling = p => (dir ? dir + '/' : '') + p;
+    const parent = state.folders.get(dir);
+    if (parent && parent.children.some(c => c !== node && c.name.toLowerCase() === newName.toLowerCase())) throw new Error(`"${newName}" already exists here`);
+
+    const moves = [{ from: repoPath(node.path), to: repoPath(sibling(newName)) }];
+    // A single-file game's thumbnail shares its base name ("Foo.html" + "Foo.png"): keep them paired.
+    if (isFile && node.thumb && parentPath(node.thumb) === dir) {
+      const [thumbBase, thumbExt] = splitExt(node.thumb.split('/').pop());
+      if (thumbBase === oldBase) moves.push({ from: repoPath(node.thumb), to: repoPath(sibling(newBase + thumbExt)) });
+    }
+    const msg = `Rename ${node.path} → ${newName}`;
+    await PPGitHub.move(state.gh.token, state.manifest.repo, moves, msg + ' (via Playable Preview)');
+    return msg;
+  }
+
+  // [{ rel, file }] relative to the current folder
+  function openUpload(items) {
+    items = items.filter(i => !JUNK.test(i.rel));
+    if (!items.length) return;
+    const folder = state.route.name === 'folder' ? state.route.path : '';
+    const total = items.reduce((s, i) => s + i.file.size, 0);
+    const tooBig = items.filter(i => i.file.size > MAX_UPLOAD_BYTES);
+    state.pendingUpload = { folder, items };
+    modal(`<h2>${icon('upload')}Upload ${items.length} file${items.length > 1 ? 's' : ''}</h2>
+      <p>To <b>${esc(folder || state.manifest.root.name)}</b> · ${fmtSize(total)}</p>
+      <ul class="file-list">${items.slice(0, 8).map(i => `<li>${htmlIcon}<span>${esc(i.rel)}</span><small>${fmtSize(i.file.size)}</small></li>`).join('')}
+        ${items.length > 8 ? `<li class="muted">+ ${items.length - 8} more</li>` : ''}</ul>
+      ${tooBig.length ? `<div class="form-error">${tooBig.length} file(s) exceed GitHub's 100 MB limit: ${esc(tooBig.map(i => i.rel).join(', '))}</div>` : ''}
+      <p class="muted small">Files with the same name are replaced. A folder containing index.html becomes one playable.</p>
+      <div class="progress" id="upProgress" hidden><div></div><span></span></div>
+      <div class="form-error" id="upError"></div>
+      <div class="modal-actions"><button class="pill-btn" data-act="close">Cancel</button><button class="pill-btn primary" data-act="upload" ${tooBig.length ? 'disabled' : ''}>Upload</button></div>`);
+  }
+
+  async function doUpload() {
+    const { folder, items } = state.pendingUpload;
+    const bar = $('#upProgress');
+    bar.hidden = false;
+    const files = items.map(i => ({ path: repoPath([folder, i.rel].filter(Boolean).join('/')), file: i.file }));
+    const msg = `Upload ${items.length} file${items.length > 1 ? 's' : ''} to ${folder || '/'}`;
+    await PPGitHub.upload(state.gh.token, state.manifest.repo, files, msg + ' (via Playable Preview)', (i, n, name) => {
+      bar.querySelector('div').style.width = Math.round((i / n) * 100) + '%';
+      bar.querySelector('span').textContent = i < n ? `${i + 1}/${n} · ${name.split('/').pop()}` : name;
+    });
+    return msg;
+  }
+
+  async function filesFromDrop(dt) {
+    const entries = [...dt.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    if (!entries.length) return [...dt.files].map(f => ({ rel: f.name, file: f }));
+    const out = [];
+    const walk = async (entry, prefix) => {
+      if (entry.isFile) {
+        out.push({ rel: prefix + entry.name, file: await new Promise((res, rej) => entry.file(res, rej)) });
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        for (let batch; (batch = await new Promise((res, rej) => reader.readEntries(res, rej))).length;) {
+          for (const e of batch) await walk(e, prefix + entry.name + '/');
+        }
+      }
+    };
+    for (const e of entries) await walk(e, '');
+    return out;
+  }
+
+  function banner(html, kind) {
+    const b = $('#banner');
+    b.className = 'banner ' + (kind || '');
+    b.innerHTML = html;
+    b.hidden = !html;
+  }
+
+  // The commit triggers a redeploy; poll manifest.json until the new build is live.
+  function awaitDeploy(msg) {
+    const since = state.manifest.generatedAt;
+    banner(`<span class="spinner"></span><span><b>Committed:</b> ${esc(msg)}. Rebuilding the site (about 1 minute)…</span>`, 'busy');
+    let tries = 0;
+    const tick = async () => {
+      tries++;
+      try {
+        const m = await (await fetch('manifest.json?t=' + Date.now(), { cache: 'no-store' })).json();
+        if (m.generatedAt > since) {
+          banner(`${icon('check')}<span>Site updated with your change.</span><button class="pill-btn" data-act="reload">Reload</button>`, 'done');
+          return;
+        }
+      } catch { /* keep polling */ }
+      if (tries < 60) setTimeout(tick, 5000);
+      else banner(`${icon('warn')}<span>Still rebuilding — check the Actions tab on GitHub.</span><button class="pill-btn" data-act="reload">Reload</button>`, 'warn');
+    };
+    setTimeout(tick, 20000);
+  }
+
+  async function runAction(btn, errorEl, fn) {
+    btn.disabled = true;
+    errorEl.textContent = '';
+    try {
+      const msg = await fn();
+      closeModal();
+      if (msg) { toast('Saved to GitHub'); awaitDeploy(msg); }
+    } catch (e) {
+      if (e.status === 401) { state.gh = null; store.set('gh', null); renderEditUI(); }
+      errorEl.textContent = e.message;
+      btn.disabled = false;
+    }
+  }
+
+  function bindEditor() {
+    $('#editBtn').addEventListener('click', openConnect);
+    $('#upFiles').addEventListener('click', () => $('#fileInput').click());
+    $('#upDir').addEventListener('click', () => $('#dirInput').click());
+    for (const id of ['#fileInput', '#dirInput']) {
+      $(id).addEventListener('change', e => {
+        openUpload([...e.target.files].map(f => ({ rel: f.webkitRelativePath || f.name, file: f })));
+        e.target.value = '';
+      });
+    }
+
+    const content = $('#content');
+    content.addEventListener('click', e => {
+      const b = e.target.closest('[data-menu]');
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openMenu(b);
+    }, true);
+    content.addEventListener('dragover', e => {
+      if (!isEditing() || state.route.name !== 'folder' || ![...e.dataTransfer.types].includes('Files')) return;
+      e.preventDefault();
+      content.classList.add('drop');
+    });
+    content.addEventListener('dragleave', e => { if (!content.contains(e.relatedTarget)) content.classList.remove('drop'); });
+    content.addEventListener('drop', async e => {
+      if (!content.classList.contains('drop')) return;
+      e.preventDefault();
+      content.classList.remove('drop');
+      openUpload(await filesFromDrop(e.dataTransfer));
+    });
+
+    $('#menu').addEventListener('click', e => {
+      const b = e.target.closest('[data-act]');
+      if (!b) return;
+      const m = $('#menu');
+      const node = m.dataset.type === 'folder' ? state.folders.get(m.dataset.path) : state.games.get(m.dataset.path);
+      closeMenu();
+      if (!node) return;
+      if (b.dataset.act === 'rename') openRename(node);
+      if (b.dataset.act === 'copy') {
+        const link = absUrl(node.type === 'folder' ? href.folder(node.path) : href.play(node.path));
+        navigator.clipboard.writeText(link).then(() => toast('Link copied'), () => window.prompt('Copy link', link));
+      }
+    });
+    document.addEventListener('click', e => { if (!e.target.closest('#menu, [data-menu]')) closeMenu(); });
+    document.addEventListener('scroll', closeMenu, true);
+
+    $('#modal').addEventListener('click', e => {
+      if (e.target.id === 'modal') return closeModal();
+      const b = e.target.closest('[data-act]');
+      if (!b) return;
+      if (b.dataset.act === 'close') closeModal();
+      if (b.dataset.act === 'disconnect') { state.gh = null; store.set('gh', null); closeModal(); renderEditUI(); renderMain(); toast('Edit mode off'); }
+      if (b.dataset.act === 'upload') runAction(b, $('#upError'), doUpload);
+    });
+    $('#modal').addEventListener('submit', async e => {
+      e.preventDefault();
+      if (e.target.id === 'connectForm') {
+        const btn = $('#connectBtn');
+        btn.disabled = true;
+        try {
+          await connect($('#ghToken').value.trim());
+          closeModal();
+          renderEditUI();
+          renderMain();
+          toast(`Edit mode on · @${state.gh.login}`);
+        } catch (err) {
+          $('#connectError').textContent = err.status === 401 ? 'Invalid token' : err.message;
+          btn.disabled = false;
+        }
+      }
+      if (e.target.id === 'renameForm') {
+        const f = e.target;
+        const node = f.dataset.type === 'folder' ? state.folders.get(f.dataset.path) : state.games.get(f.dataset.path);
+        runAction($('#renameBtn'), $('#renameError'), () => doRename(node, $('#renameInput').value));
+      }
+    });
+    $('#banner').addEventListener('click', e => { if (e.target.closest('[data-act="reload"]')) location.reload(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeMenu(); if (!$('#modal').hidden) closeModal(); } }, true);
   }
 
   /* ---------- access control ---------- */
@@ -672,6 +971,8 @@
     document.querySelectorAll('[data-icon]').forEach(el => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon)));
     bind();
     bindAuth();
+    bindEditor();
+    window.PP_OPEN_CTA = state.openCta;
     let manifest;
     try {
       manifest = await loadData();

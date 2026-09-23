@@ -7,6 +7,14 @@
     try { parent.postMessage({ __pp: 1, type: type, detail: String(detail == null ? '' : detail) }, '*'); } catch (e) { /* ignore */ }
   };
   var listeners = {}, state = 'loading', viewable = false;
+  // CTA opens the real store link (from the click gesture inside the ad, so
+  // popup blockers allow it) unless the preview's "Open CTA links" is off.
+  var nativeOpen = window.open;
+  var openLink = function (url) {
+    var allow = true;
+    try { allow = parent.PP_OPEN_CTA !== false; } catch (e) { /* cross-origin parent */ }
+    if (allow && url) { try { nativeOpen.call(window, url, '_blank', 'noopener'); } catch (e) { /* blocked */ } }
+  };
   var orientation = { allowOrientationChange: true, forceOrientation: 'none' };
   var size = function () { return { width: window.innerWidth, height: window.innerHeight }; };
   var rect = function () { var s = size(); return { x: 0, y: 0, width: s.width, height: s.height }; };
@@ -43,7 +51,7 @@
       if (!listeners[ev]) return;
       listeners[ev] = fn ? listeners[ev].filter(function (f) { return f !== fn; }) : [];
     },
-    open: function (url) { post('cta', 'mraid.open(' + (url || '') + ')'); },
+    open: function (url) { post('cta', 'mraid.open(' + (url || '') + ')'); openLink(url); },
     close: function () { post('close', 'mraid.close()'); },
     unload: function () { post('close', 'mraid.unload()'); },
     expand: function () { post('mraid', 'expand()'); },
@@ -54,7 +62,7 @@
     createCalendarEvent: function () { post('mraid', 'createCalendarEvent()'); },
   };
   if (!window.ExitApi) window.ExitApi = { exit: function () { post('cta', 'ExitApi.exit()'); } };
-  window.open = function (url) { post('cta', 'window.open(' + (url || '') + ')'); return null; };
+  window.open = function (url) { post('cta', 'window.open(' + (url || '') + ')'); openLink(url); return null; };
   window.addEventListener('error', function (e) {
     var t = e.target;
     if (t && t !== window && (t.src || t.href)) post('error', 'Failed to load ' + (t.src || t.href));

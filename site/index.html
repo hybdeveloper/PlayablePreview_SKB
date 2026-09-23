@@ -20,6 +20,7 @@
         <input id="search" type="search" placeholder="Search playables" autocomplete="off" spellcheck="false">
         <button class="icon-btn" id="searchClear" aria-label="Clear search" data-icon="close" hidden></button>
       </label>
+      <button class="icon-btn edit-btn" id="editBtn" title="Edit mode (rename / upload)" aria-label="Edit mode" data-icon="edit" hidden></button>
       <div class="account" id="account" hidden></div>
     </header>
 
@@ -37,6 +38,12 @@
     <main class="main">
       <div class="toolbar">
         <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+        <div class="edit-actions" id="editActions" hidden>
+          <button class="pill-btn primary" id="upFiles"><span data-icon="upload"></span>Upload files</button>
+          <button class="pill-btn" id="upDir"><span data-icon="folderUp"></span>Upload folder</button>
+          <input type="file" id="fileInput" multiple hidden>
+          <input type="file" id="dirInput" webkitdirectory multiple hidden>
+        </div>
         <div class="toolbar-actions">
           <select id="sortKey" aria-label="Sort by">
             <option value="name">Name</option>
@@ -50,6 +57,7 @@
           </div>
         </div>
       </div>
+      <div class="banner" id="banner" hidden></div>
       <div class="content" id="content"></div>
     </main>
   </div>
@@ -97,6 +105,7 @@
           <h3>Options</h3>
           <label class="switch"><input type="checkbox" id="optInject"><span></span>Inject MRAID stub</label>
           <label class="switch"><input type="checkbox" id="optFrame"><span></span>Show device frame</label>
+          <label class="switch"><input type="checkbox" id="optCta"><span></span>Open CTA store links</label>
         </section>
         <section>
           <h3>AppLovin checks</h3>
@@ -121,6 +130,9 @@
     </div>
   </section>
 
+  <div class="menu" id="menu" role="menu" hidden></div>
+  <div class="modal" id="modal" hidden><div class="modal-card" id="modalCard" role="dialog" aria-modal="true"></div></div>
+
   <section class="login" id="login" hidden>
     <form class="login-card" id="loginForm" autocomplete="off">
       <button type="button" class="icon-btn login-close" id="loginClose" aria-label="Close" data-icon="close"></button>
@@ -137,6 +149,7 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
   <script src="assets/shared.js" defer></script>
+  <script src="assets/github.js" defer></script>
   <script src="assets/app.js" defer></script>
 </body>
 </html>
