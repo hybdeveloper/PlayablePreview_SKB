@@ -26,6 +26,8 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/build.js --out dist
+        env:
+          PREVIEW_ACCESS: ${{ secrets.PREVIEW_ACCESS }}   # passwords/folders JSON; empty = no password
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:

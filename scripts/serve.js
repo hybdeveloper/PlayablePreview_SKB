@@ -1,7 +1,8 @@
 // Local dev server. The manifest is regenerated on every request, so new games
 // show up after a browser refresh. Listens on all interfaces so a phone on the
 // same Wi-Fi can open the QR code link.
-// Usage: node scripts/serve.js [port]
+// Usage: node scripts/serve.js [port]          live from site/ + games/ (no passwords)
+//        node scripts/serve.js --dist [port]   serve the built dist/ (test a protected build)
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
@@ -9,9 +10,10 @@ const path = require('path');
 const { buildManifest } = require('./manifest');
 
 const ROOT = path.resolve(__dirname, '..');
-const SITE = path.join(ROOT, 'site');
-const GAMES = path.join(ROOT, 'games');
-const PORT = Number(process.argv[2] || process.env.PORT || 5173);
+const DIST = process.argv.includes('--dist') ? path.join(ROOT, 'dist') : null;
+const SITE = DIST || path.join(ROOT, 'site');
+const GAMES = DIST ? path.join(DIST, 'games') : path.join(ROOT, 'games');
+const PORT = Number(process.argv.slice(2).find(a => /^\d+$/.test(a)) || process.env.PORT || 5173);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
@@ -34,7 +36,7 @@ http.createServer((req, res) => {
   let pathname;
   try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch { return send(res, 400, 'Bad request'); }
 
-  if (pathname === '/manifest.json') {
+  if (pathname === '/manifest.json' && !DIST) {
     return send(res, 200, JSON.stringify(buildManifest(GAMES)), MIME['.json']);
   }
 

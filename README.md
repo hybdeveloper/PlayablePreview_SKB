@@ -52,6 +52,34 @@ Mở http://localhost:5173 . Thêm/sửa game rồi **F5** là thấy ngay.
 
 > Cả hai CI đều clone full history để cột **Modified** hiển thị đúng ngày commit cuối của từng game.
 
+## Mật khẩu & phân quyền thư mục
+
+Mỗi mật khẩu được xem một số thư mục nhất định. Khi đã bật, file game private được **mã hoá AES-256** lúc build (tên file cũng bị thay bằng mã băm), nên tải trộm về cũng không đọc được.
+
+1. Viết cấu hình (xem mẫu [access.example.json](access.example.json)):
+   ```json
+   {
+     "public": ["Demo/Puzzle"],
+     "users": [
+       { "name": "Admin",    "password": "mat-khau-admin", "folders": ["*"] },
+       { "name": "Client A", "password": "mat-khau-a",     "folders": ["ClientA", "Demo/Runner"] }
+     ]
+   }
+   ```
+   - `folders`: đường dẫn trong `games/`; `"*"` = tất cả. Được quyền thư mục cha là xem được mọi thư mục con.
+   - `public` (tuỳ chọn): các thư mục ai cũng xem được, không cần mật khẩu. Nếu bỏ trống, vào trang là phải đăng nhập ngay.
+   - Mỗi người một mật khẩu khác nhau. `name` là tên hiển thị góc phải sau khi đăng nhập.
+2. **GitHub**: *Settings → Secrets and variables → Actions → New repository secret*, tên `PREVIEW_ACCESS`, dán nguyên JSON trên vào → chạy lại workflow.
+   **GitLab**: *Settings → CI/CD → Variables*, key `PREVIEW_ACCESS` (tích *Protect*, không cần *Mask*).
+3. Đổi mật khẩu / thêm người / đổi quyền: sửa secret rồi chạy lại workflow. Mật khẩu cũ mất hiệu lực ngay sau lần deploy đó.
+
+Không có secret thì web chạy như cũ (không cần mật khẩu). Chạy local bằng `serve.bat` luôn xem được hết.
+Muốn thử bản có mật khẩu trên máy: tạo file `access.config.json` (đã gitignore) rồi `node scripts/build.js && node scripts/serve.js --dist`.
+
+> ⚠️ Mã hoá chỉ bảo vệ **trang web**. Nếu repo để **public** thì ai cũng xem được thư mục `games/` ngay trên GitHub. Muốn giấu game thật sự phải để repo **private** (GitHub Pages với repo private cần gói Pro/Team, hoặc dùng GitLab Pages / Cloudflare Pages miễn phí).
+>
+> Lưu ý: file dùng chung giữa các thư mục có quyền khác nhau (vd `_shared/`) chỉ người có quyền `*` đọc được — hãy để asset nằm trong thư mục game, hoặc đưa `_shared` vào `public`.
+
 ## Tính năng
 
 **Trình duyệt (kiểu Drive)**

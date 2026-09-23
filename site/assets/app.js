@@ -37,6 +37,8 @@
     check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
     warn: 'M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z',
     empty: 'M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z',
+    lock: 'M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z',
+    logout: 'M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z',
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[name]}"/></svg>`;
   const htmlIcon = `<svg class="i file-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3" fill="#e8710a"/><path fill="#fff" transform="translate(4.8 4.8) scale(.6)" d="M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0 4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>`;
@@ -101,6 +103,9 @@
     frameEl: null,
     loadToken: 0,
     navigated: false,
+    protected: false,
+    access: null,
+    user: null,
   };
 
   function indexTree(node) {
@@ -121,10 +126,12 @@
   }
 
   function render() {
+    if (!state.manifest) return;
     const r = parseRoute();
     if (r.name === 'play') {
       const g = state.games.get(r.path);
       if (g) return openPlayer(g);
+      if (state.protected && !state.user) { showLogin(true); return; }
       toast('Playable not found: ' + r.path);
       location.replace(href.folder(parentPath(r.path)));
       return;
@@ -274,100 +281,6 @@
 
   /* ---------- player ---------- */
 
-  // Runs inside the playable's iframe (serialised into the page). Mimics the
-  // MRAID container AppLovin provides and reports activity to the preview.
-  function mraidStub() {
-    if (window.__ppStub) return;
-    window.__ppStub = true;
-    var post = function (type, detail) {
-      try { parent.postMessage({ __pp: 1, type: type, detail: String(detail == null ? '' : detail) }, '*'); } catch (e) { /* ignore */ }
-    };
-    var listeners = {}, state = 'loading', viewable = false;
-    var orientation = { allowOrientationChange: true, forceOrientation: 'none' };
-    var size = function () { return { width: window.innerWidth, height: window.innerHeight }; };
-    var rect = function () { var s = size(); return { x: 0, y: 0, width: s.width, height: s.height }; };
-    function fire(ev) {
-      var args = Array.prototype.slice.call(arguments, 1);
-      (listeners[ev] || []).slice().forEach(function (fn) {
-        try { fn.apply(window, args); } catch (e) { post('error', (e && e.stack) || e); }
-      });
-    }
-    window.mraid = {
-      getVersion: function () { return '3.0'; },
-      getState: function () { return state; },
-      getPlacementType: function () { return 'interstitial'; },
-      isViewable: function () { return viewable; },
-      getMaxSize: size,
-      getScreenSize: size,
-      getCurrentPosition: rect,
-      getDefaultPosition: rect,
-      getExpandProperties: function () { var s = size(); return { width: s.width, height: s.height, useCustomClose: false, isModal: true }; },
-      setExpandProperties: function () {},
-      getResizeProperties: function () { return {}; },
-      setResizeProperties: function () {},
-      getOrientationProperties: function () { return orientation; },
-      setOrientationProperties: function (p) { orientation = p || orientation; post('mraid', 'setOrientationProperties(' + JSON.stringify(p) + ')'); },
-      getCurrentAppOrientation: function () { var s = size(); return { orientation: s.width > s.height ? 'landscape' : 'portrait', locked: false }; },
-      getAudioVolumePercentage: function () { return 100; },
-      supports: function (f) { return f === 'inlineVideo'; },
-      addEventListener: function (ev, fn) {
-        if (typeof fn !== 'function') return;
-        (listeners[ev] = listeners[ev] || []).push(fn);
-        post('mraid', 'addEventListener("' + ev + '")');
-      },
-      removeEventListener: function (ev, fn) {
-        if (!listeners[ev]) return;
-        listeners[ev] = fn ? listeners[ev].filter(function (f) { return f !== fn; }) : [];
-      },
-      open: function (url) { post('cta', 'mraid.open(' + (url || '') + ')'); },
-      close: function () { post('close', 'mraid.close()'); },
-      unload: function () { post('close', 'mraid.unload()'); },
-      expand: function () { post('mraid', 'expand()'); },
-      resize: function () { post('mraid', 'resize()'); },
-      useCustomClose: function (v) { post('mraid', 'useCustomClose(' + v + ')'); },
-      playVideo: function (url) { post('mraid', 'playVideo(' + url + ')'); },
-      storePicture: function (url) { post('mraid', 'storePicture(' + url + ')'); },
-      createCalendarEvent: function () { post('mraid', 'createCalendarEvent()'); },
-    };
-    if (!window.ExitApi) window.ExitApi = { exit: function () { post('cta', 'ExitApi.exit()'); } };
-    window.open = function (url) { post('cta', 'window.open(' + (url || '') + ')'); return null; };
-    window.addEventListener('error', function (e) {
-      var t = e.target;
-      if (t && t !== window && (t.src || t.href)) post('error', 'Failed to load ' + (t.src || t.href));
-      else post('error', (e.message || 'Error') + (e.lineno ? ' (line ' + e.lineno + ')' : ''));
-    }, true);
-    window.addEventListener('unhandledrejection', function (e) { post('error', 'Unhandled rejection: ' + ((e.reason && e.reason.message) || e.reason)); });
-    ['error', 'warn'].forEach(function (k) {
-      var orig = console[k];
-      console[k] = function () {
-        post('console', k + ': ' + Array.prototype.map.call(arguments, String).join(' '));
-        return orig.apply(console, arguments);
-      };
-    });
-    var ready = function () {
-      setTimeout(function () {
-        state = 'default'; viewable = true;
-        post('event', 'ready → stateChange(default) → viewableChange(true)');
-        fire('ready'); fire('stateChange', 'default'); fire('viewableChange', true);
-      }, 0);
-    };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready); else ready();
-    var last = '';
-    window.addEventListener('resize', function () {
-      var s = size(), key = s.width + 'x' + s.height;
-      if (key === last) return;
-      last = key;
-      fire('sizeChange', s.width, s.height);
-    });
-  }
-
-  function injectHtml(html, baseHref) {
-    const tag = `<base href="${esc(baseHref)}"><script>(${mraidStub.toString()})();<\/script>`;
-    const m = html.match(/<head\b[^>]*>/i) || html.match(/<html\b[^>]*>/i) || html.match(/<!doctype[^>]*>/i);
-    if (!m) return tag + html;
-    const at = m.index + m[0].length;
-    return html.slice(0, at) + tag + html.slice(at);
-  }
 
   const els = {};
 
@@ -437,7 +350,9 @@
     if (token !== state.loadToken) return;
 
     renderChecks(g, html);
-    if (state.inject && html != null) frame.srcdoc = injectHtml(html, absUrl(url));
+    // Protected builds: the service worker decrypts files and injects the stub itself.
+    if (state.protected) frame.src = url + (state.inject ? '?pp_inject=1' : '');
+    else if (state.inject && html != null) frame.srcdoc = PPShared.injectHtml(html, absUrl(url));
     else frame.src = url;
     frame.addEventListener('load', () => {
       if (token === state.loadToken) log('info', `Loaded in ${Math.round(performance.now() - t0)} ms`);
@@ -466,7 +381,9 @@
   }
 
   function renderQR(g) {
-    const url = absUrl(gameUrl(g));
+    // Protected games only open inside the app (after sign-in), so link the preview page.
+    const locked = state.protected && !PPShared.isUnder(g.path, state.access.public || []);
+    const url = locked ? absUrl(href.play(g.path)) : absUrl(gameUrl(g));
     const box = $('#qr');
     if (window.qrcode) {
       const qr = window.qrcode(0, 'M');
@@ -650,18 +567,126 @@
     });
   }
 
+  /* ---------- access control ---------- */
+
+  // Protected builds need the service worker to control this page before any game loads.
+  async function ensureServiceWorker() {
+    if (!('serviceWorker' in navigator)) throw new Error('This browser does not support service workers');
+    await navigator.serviceWorker.register('sw.js');
+    const reg = await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) {
+      const claimed = new Promise(res => navigator.serviceWorker.addEventListener('controllerchange', res, { once: true }));
+      reg.active.postMessage({ type: 'claim' });
+      await Promise.race([claimed, new Promise(res => setTimeout(res, 3000))]);
+    }
+    navigator.serviceWorker.controller?.postMessage({ type: 'refresh' });
+  }
+
+  function renderAccount() {
+    const box = $('#account');
+    box.hidden = !state.protected;
+    if (!state.protected) return;
+    box.innerHTML = state.user
+      ? `<span class="avatar" style="--h:${hue(state.user)}">${esc(state.user.trim()[0] || '?').toUpperCase()}</span>
+         <span class="acc-name">${esc(state.user)}</span>
+         <button class="icon-btn" id="logout" title="Sign out" aria-label="Sign out">${icon('logout')}</button>`
+      : `<button class="signin-btn" id="signin">${icon('lock')}Sign in</button>`;
+  }
+
+  function showLogin(dismissible) {
+    const box = $('#login');
+    box.hidden = false;
+    $('#loginClose').hidden = !dismissible;
+    $('#loginError').textContent = '';
+    setTimeout(() => $('#loginPass').focus(), 0);
+  }
+
+  async function signIn(password) {
+    const key = await PPShared.deriveKey(password, state.access.kdf);
+    const payload = await PPShared.unlock(state.access, key);
+    if (!payload) return false;
+    await PPShared.saveKey(key);
+    location.reload();
+    return true;
+  }
+
+  async function signOut() {
+    await PPShared.clearKey();
+    navigator.serviceWorker.controller?.postMessage({ type: 'refresh' });
+    location.hash = '#/';
+    location.reload();
+  }
+
+  function bindAuth() {
+    $('#account').addEventListener('click', e => {
+      if (e.target.closest('#logout')) signOut();
+      else if (e.target.closest('#signin')) showLogin(true);
+    });
+    $('#loginClose').addEventListener('click', () => {
+      $('#login').hidden = true;
+      if (parseRoute().name === 'play') location.hash = '#/';
+    });
+    $('#loginForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const input = $('#loginPass'), btn = $('#loginBtn');
+      if (!input.value) return;
+      btn.disabled = true;
+      $('#loginError').textContent = '';
+      try {
+        if (!(await signIn(input.value))) {
+          $('#loginError').textContent = 'Wrong password';
+          input.select();
+        }
+      } catch (err) {
+        $('#loginError').textContent = 'Sign-in failed: ' + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  async function loadData() {
+    PPShared.init(new URL('./', location.href).href);
+    const access = await PPShared.fetchAccess();
+    if (!access) {
+      const res = await fetch('manifest.json', { cache: 'no-cache' });
+      if (!res.ok) throw new Error('manifest.json: HTTP ' + res.status);
+      return res.json();
+    }
+    state.protected = true;
+    state.access = access;
+    await ensureServiceWorker();
+    const key = await PPShared.loadKey();
+    const payload = key && await PPShared.unlock(access, key);
+    if (key && !payload) await PPShared.clearKey(); // password removed or changed
+    if (payload) {
+      state.user = payload.name;
+      return payload.manifest;
+    }
+    if (!(access.public || []).length) return null; // nothing to show without a password
+    const res = await fetch('manifest.json', { cache: 'no-cache' });
+    return res.json();
+  }
+
   async function init() {
     document.querySelectorAll('[data-icon]').forEach(el => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon)));
     bind();
+    bindAuth();
+    let manifest;
     try {
-      const res = await fetch('manifest.json', { cache: 'no-cache' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      state.manifest = await res.json();
+      manifest = await loadData();
     } catch (e) {
-      $('#content').innerHTML = `<div class="empty">${icon('warn')}<p>Could not load <code>manifest.json</code> (${esc(e.message)})</p>
+      $('#content').innerHTML = `<div class="empty">${icon('warn')}<p>Could not load the playable list (${esc(e.message)})</p>
         <small>Run <code>node scripts/build.js</code> or start the dev server: <code>node scripts/serve.js</code>.</small></div>`;
       return;
     }
+    renderAccount();
+    if (!manifest) {
+      document.body.classList.add('locked');
+      showLogin(false);
+      return;
+    }
+    state.manifest = manifest;
     indexTree(state.manifest.root);
     render();
   }

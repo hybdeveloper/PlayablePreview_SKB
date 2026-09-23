@@ -20,6 +20,7 @@
         <input id="search" type="search" placeholder="Search playables" autocomplete="off" spellcheck="false">
         <button class="icon-btn" id="searchClear" aria-label="Clear search" data-icon="close" hidden></button>
       </label>
+      <div class="account" id="account" hidden></div>
     </header>
 
     <aside class="sidebar" id="sidebar">
@@ -120,9 +121,22 @@
     </div>
   </section>
 
+  <section class="login" id="login" hidden>
+    <form class="login-card" id="loginForm" autocomplete="off">
+      <button type="button" class="icon-btn login-close" id="loginClose" aria-label="Close" data-icon="close"></button>
+      <span class="brand-logo" data-icon="play"></span>
+      <h1>Playable Preview</h1>
+      <p>Enter your access password to see the playables shared with you.</p>
+      <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" required>
+      <div class="login-error" id="loginError" role="alert"></div>
+      <button type="submit" class="login-btn" id="loginBtn">Sign in</button>
+    </form>
+  </section>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
+  <script src="assets/shared.js" defer></script>
   <script src="assets/app.js" defer></script>
 </body>
 </html>

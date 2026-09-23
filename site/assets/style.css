@@ -184,6 +184,41 @@ button.caret:hover { background: var(--line); }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* ---------- access ---------- */
+.account { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 600; color: #fff;
+  background: hsl(var(--h) 55% 45%);
+}
+.acc-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.signin-btn {
+  display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 18px 0 14px; border: 1px solid var(--line);
+  border-radius: 20px; background: var(--surface); color: var(--accent); font-weight: 500;
+}
+.signin-btn:hover { background: var(--hover); }
+.signin-btn .i { width: 18px; height: 18px; }
+body.locked #app { visibility: hidden; }
+
+.login { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(8, 10, 16, .55); backdrop-filter: blur(6px); }
+body.locked .login { background: var(--bg); backdrop-filter: none; }
+.login-card {
+  position: relative; width: min(380px, 100%); background: var(--surface); border-radius: 20px; box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
+  padding: 32px 28px 28px; display: flex; flex-direction: column; align-items: center; text-align: center;
+}
+.login-card .brand-logo { width: 52px; height: 52px; border-radius: 14px; }
+.login-card .brand-logo .i { width: 30px; height: 30px; }
+.login-card h1 { font-size: 22px; font-weight: 500; margin: 16px 0 6px; }
+.login-card p { margin: 0 0 20px; color: var(--muted); }
+.login-card input {
+  width: 100%; height: 48px; border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; font-size: 16px;
+  background: var(--surface); color: var(--text); outline: 0;
+}
+.login-card input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+.login-error { min-height: 20px; margin: 8px 0 4px; font-size: 13px; color: #d93025; }
+.login-btn { width: 100%; height: 44px; border: 0; border-radius: 22px; background: #3478f6; color: #fff; font-weight: 500; font-size: 15px; }
+.login-btn:disabled { opacity: .6; cursor: progress; }
+.login-close { position: absolute; top: 8px; right: 8px; }
+
 /* ---------- player ---------- */
 .player {
   position: fixed; inset: 0; z-index: 50; display: grid; grid-template-rows: 56px minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
@@ -297,6 +332,7 @@ button.caret:hover { background: var(--line); }
   .game-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
   .list, .list.with-loc { --cols: minmax(0, 1fr) 90px; }
   .lr-date, .lr-loc, .lh-modified, .lh-loc { display: none !important; }
+  .acc-name { display: none; }
 
   .player-bar { padding: 0 4px; }
   .player-actions #pOpen, .player-actions #pCopy, .player-actions #pRotate { display: none; }

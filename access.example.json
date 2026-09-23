@@ -1,0 +1,7 @@
+{
+  "public": ["Demo/Puzzle"],
+  "users": [
+    { "name": "Admin", "password": "change-me-admin", "folders": ["*"] },
+    { "name": "Client A", "password": "change-me-client-a", "folders": ["Demo/Runner"] }
+  ]
+}
