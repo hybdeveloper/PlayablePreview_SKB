@@ -1,0 +1,12 @@
+pages:
+  image: node:20
+  stage: deploy
+  variables:
+    GIT_DEPTH: 0   # full history -> real "Modified" dates
+  script:
+    - node scripts/build.js --out public
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

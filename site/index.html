@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Playable Preview</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%233478f6'/%3E%3Cpath d='M9 6.5v11l8.5-5.5z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open folders" data-icon="menu"></button>
+      <a class="brand" href="#/">
+        <span class="brand-logo" data-icon="play"></span>
+        <span>Playable Preview</span>
+      </a>
+      <label class="search">
+        <span data-icon="search"></span>
+        <input id="search" type="search" placeholder="Search playables" autocomplete="off" spellcheck="false">
+        <button class="icon-btn" id="searchClear" aria-label="Clear search" data-icon="close" hidden></button>
+      </label>
+    </header>
+
+    <aside class="sidebar" id="sidebar">
+      <nav class="nav">
+        <a class="nav-item" data-nav="root" href="#/"><span data-icon="home"></span>All playables</a>
+        <a class="nav-item" data-nav="recent" href="#/recent"><span data-icon="clock"></span>Recent</a>
+      </nav>
+      <div class="tree-label">Folders</div>
+      <div class="tree" id="tree"></div>
+      <div class="side-foot" id="stats"></div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+
+    <main class="main">
+      <div class="toolbar">
+        <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+        <div class="toolbar-actions">
+          <select id="sortKey" aria-label="Sort by">
+            <option value="name">Name</option>
+            <option value="modified">Modified</option>
+            <option value="size">Size</option>
+          </select>
+          <button class="icon-btn" id="sortDir" aria-label="Toggle sort direction" data-icon="arrowUp"></button>
+          <div class="seg" id="viewToggle" role="group" aria-label="View">
+            <button data-view="grid" aria-label="Grid view" data-icon="grid"></button>
+            <button data-view="list" aria-label="List view" data-icon="list"></button>
+          </div>
+        </div>
+      </div>
+      <div class="content" id="content"></div>
+    </main>
+  </div>
+
+  <section class="player" id="player" hidden>
+    <header class="player-bar">
+      <button class="icon-btn" id="pBack" aria-label="Back" data-icon="back"></button>
+      <div class="player-title">
+        <b id="pTitle"></b>
+        <span id="pPath"></span>
+      </div>
+      <div class="player-actions">
+        <button class="icon-btn" id="pReload" title="Reload (R)" data-icon="reload"></button>
+        <button class="icon-btn" id="pRotate" title="Rotate (O)" data-icon="rotate"></button>
+        <button class="icon-btn" id="pFull" title="Fullscreen" data-icon="fullscreen"></button>
+        <a class="icon-btn" id="pOpen" title="Open raw file in new tab" target="_blank" rel="noopener" data-icon="openNew"></a>
+        <button class="icon-btn" id="pCopy" title="Copy preview link" data-icon="link"></button>
+        <button class="icon-btn panel-btn" id="pPanel" title="Tools" data-icon="tune"></button>
+      </div>
+    </header>
+
+    <div class="player-body">
+      <div class="stage" id="stage">
+        <div class="device-wrap" id="deviceWrap">
+          <div class="device" id="device">
+            <div class="screen" id="screen"><div class="notch" id="notch"></div></div>
+          </div>
+        </div>
+        <div class="dims" id="dims"></div>
+      </div>
+
+      <aside class="panel" id="panel">
+        <section>
+          <h3>Device</h3>
+          <div class="device-list" id="deviceList"></div>
+        </section>
+        <section>
+          <h3>Orientation</h3>
+          <div class="seg seg-wide" id="orient">
+            <button data-orient="portrait"><span data-icon="portrait"></span>Portrait</button>
+            <button data-orient="landscape"><span data-icon="landscape"></span>Landscape</button>
+          </div>
+        </section>
+        <section>
+          <h3>Options</h3>
+          <label class="switch"><input type="checkbox" id="optInject"><span></span>Inject MRAID stub</label>
+          <label class="switch"><input type="checkbox" id="optFrame"><span></span>Show device frame</label>
+        </section>
+        <section>
+          <h3>AppLovin checks</h3>
+          <ul class="checks" id="checks"></ul>
+        </section>
+        <section>
+          <h3>Details</h3>
+          <dl class="info" id="info"></dl>
+        </section>
+        <section>
+          <h3>Test on device</h3>
+          <div class="qr-box">
+            <div class="qr" id="qr"></div>
+            <p>Scan with your phone to play fullscreen.<br><span class="qr-note" id="qrNote"></span></p>
+          </div>
+        </section>
+        <section class="log-section">
+          <h3>Events <button class="text-btn" id="logClear">Clear</button></h3>
+          <ol class="log" id="log"></ol>
+        </section>
+      </aside>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
+  <script src="assets/app.js" defer></script>
+</body>
+</html>

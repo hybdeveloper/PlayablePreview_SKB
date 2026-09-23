@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Color Match</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; user-select: none; }
+  body { background: linear-gradient(160deg, #2b1a6b, #120a33); color: #fff; font-family: system-ui, sans-serif;
+         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4vmin; }
+  #hud { font-size: 5vmin; font-weight: 700; display: flex; align-items: center; gap: 2vmin; }
+  #target { width: 7vmin; height: 7vmin; border-radius: 1.6vmin; box-shadow: 0 0 0 .6vmin #fff; }
+  #grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2vmin; width: 72vmin; }
+  .tile { aspect-ratio: 1; border-radius: 2.4vmin; box-shadow: inset 0 -1vmin rgba(0,0,0,.25); transition: transform .12s; cursor: pointer; }
+  .tile:active { transform: scale(.9); }
+  #end { position: fixed; inset: 0; background: rgba(10,5,30,.85); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5vmin; }
+  #end[hidden] { display: none; }
+  #end h1 { margin: 0; font-size: 9vmin; }
+  #cta { font: 800 6vmin system-ui; color: #1a1040; background: #ffd23f; border: 0; border-radius: 5vmin; padding: 3vmin 10vmin;
+         box-shadow: 0 1.2vmin 0 #c79a00; animation: pulse 1s infinite alternate; cursor: pointer; }
+  @keyframes pulse { to { transform: scale(1.08); } }
+</style>
+</head>
+<body>
+  <div id="hud">Find <div id="target"></div> <span id="score">0</span>/5</div>
+  <div id="grid"></div>
+  <div id="end" hidden><h1>Great job!</h1><button id="cta">PLAY NOW</button></div>
+<script>
+  var COLORS = ['#ff5d73', '#3dd6d0', '#ffd23f', '#7b5cff', '#4ec77a'];
+  var STORE = 'https://play.google.com/store/apps/details?id=com.example.colormatch';
+  var grid = document.getElementById('grid'), score = 0, target;
+
+  function pick() { return COLORS[Math.floor(Math.random() * COLORS.length)]; }
+  function deal() {
+    target = pick();
+    document.getElementById('target').style.background = target;
+    grid.innerHTML = '';
+    var hasTarget = false;
+    for (var i = 0; i < 16; i++) {
+      var c = pick(); if (c === target) hasTarget = true;
+      var t = document.createElement('div'); t.className = 'tile'; t.style.background = c; t.dataset.c = c;
+      grid.appendChild(t);
+    }
+    if (!hasTarget) {
+      var r = grid.children[Math.floor(Math.random() * 16)];
+      r.style.background = r.dataset.c = target;
+    }
+  }
+  grid.addEventListener('pointerdown', function (e) {
+    var t = e.target.closest('.tile'); if (!t) return;
+    if (t.dataset.c === target) {
+      score++; document.getElementById('score').textContent = score;
+      if (score >= 5) document.getElementById('end').hidden = false; else deal();
+    }
+  });
+  document.getElementById('cta').addEventListener('click', function () {
+    if (window.mraid) mraid.open(STORE); else window.open(STORE);
+  });
+
+  function start() { deal(); }
+  if (window.mraid && mraid.getState() === 'loading') mraid.addEventListener('ready', start); else start();
+</script>
+</body>
+</html>

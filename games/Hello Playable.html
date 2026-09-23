@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Hello Playable</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { display: grid; place-items: center; text-align: center; font-family: system-ui, sans-serif; color: #fff;
+         background: radial-gradient(circle at 30% 20%, #3478f6, #0e1a3d); }
+  h1 { font-size: 8vmin; margin: 0 0 2vmin; }
+  p { font-size: 4vmin; opacity: .8; margin: 0 0 6vmin; }
+  button { font: 700 5vmin system-ui; border: 0; border-radius: 4vmin; padding: 3vmin 8vmin; background: #fff; color: #0e1a3d; cursor: pointer; }
+</style>
+</head>
+<body>
+  <div>
+    <h1>Hello, Playable!</h1>
+    <p id="state">Waiting for MRAID…</p>
+    <button id="cta">Download</button>
+  </div>
+<script>
+  function show() {
+    var s = window.mraid ? 'MRAID ' + mraid.getVersion() + ' · state: ' + mraid.getState() + ' · ' + innerWidth + '×' + innerHeight : 'No MRAID (opened directly)';
+    document.getElementById('state').textContent = s;
+  }
+  if (window.mraid) {
+    mraid.addEventListener('ready', show);
+    mraid.addEventListener('sizeChange', show);
+    mraid.addEventListener('viewableChange', show);
+  }
+  addEventListener('resize', show);
+  show();
+  document.getElementById('cta').onclick = function () {
+    var url = 'https://play.google.com/store/apps/details?id=com.example.hello';
+    if (window.mraid) mraid.open(url); else window.open(url);
+  };
+</script>
+</body>
+</html>
