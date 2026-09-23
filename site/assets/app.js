@@ -583,6 +583,7 @@
   const JUNK = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
   const isEditing = () => !!(state.gh && state.manifest && state.manifest.repo);
   const repoPath = p => [state.manifest.repo.games, p].filter(Boolean).join('/');
+  const byline = () => (state.user ? ` (by ${state.user} via Playable Preview)` : ' (via Playable Preview)');
 
   function moreBtn(node) {
     return isEditing() && node.path
@@ -592,7 +593,9 @@
 
   function renderEditUI() {
     const repo = state.manifest && state.manifest.repo;
-    $('#editBtn').hidden = !repo;
+    // Password-protected sites grant editing through the login ("edit": true); the
+    // manual token dialog is only offered on sites without passwords.
+    $('#editBtn').hidden = !repo || (state.protected && !isEditing());
     $('#editBtn').classList.toggle('on', isEditing());
     $('#editActions').hidden = !isEditing() || state.route.name !== 'folder' || !!state.query.trim();
     document.body.classList.toggle('editing', isEditing());
@@ -609,6 +612,13 @@
   function openConnect() {
     const r = state.manifest.repo;
     const repoName = `${r.owner}/${r.name}`;
+    if (state.gh && state.gh.fromLogin) {
+      modal(`<h2>${icon('edit')}Edit mode</h2>
+        <p>Your account <b>${esc(state.user)}</b> can edit <b>${esc(repoName)}</b>.</p>
+        <p class="muted">Use the ⋮ button on any item to rename it, or the upload buttons / drag &amp; drop in a folder. Each change is one commit; the site redeploys in about a minute.</p>
+        <div class="modal-actions"><button class="pill-btn primary" data-act="close">Done</button></div>`);
+      return;
+    }
     if (state.gh) {
       modal(`<h2>${icon('edit')}Edit mode</h2>
         <p>Connected as <b>@${esc(state.gh.login || 'unknown')}</b> to <b>${esc(repoName)}</b> (branch <code>${esc(r.branch)}</code>).</p>
@@ -689,7 +699,7 @@
       if (thumbBase === oldBase) moves.push({ from: repoPath(node.thumb), to: repoPath(sibling(newBase + thumbExt)) });
     }
     const msg = `Rename ${node.path} → ${newName}`;
-    await PPGitHub.move(state.gh.token, state.manifest.repo, moves, msg + ' (via Playable Preview)');
+    await PPGitHub.move(state.gh.token, state.manifest.repo, moves, msg + byline());
     return msg;
   }
 
@@ -718,7 +728,7 @@
     bar.hidden = false;
     const files = items.map(i => ({ path: repoPath([folder, i.rel].filter(Boolean).join('/')), file: i.file }));
     const msg = `Upload ${items.length} file${items.length > 1 ? 's' : ''} to ${folder || '/'}`;
-    await PPGitHub.upload(state.gh.token, state.manifest.repo, files, msg + ' (via Playable Preview)', (i, n, name) => {
+    await PPGitHub.upload(state.gh.token, state.manifest.repo, files, msg + byline(), (i, n, name) => {
       bar.querySelector('div').style.width = Math.round((i / n) * 100) + '%';
       bar.querySelector('span').textContent = i < n ? `${i + 1}/${n} · ${name.split('/').pop()}` : name;
     });
@@ -778,6 +788,11 @@
       closeModal();
       if (msg) { toast('Saved to GitHub'); awaitDeploy(msg); }
     } catch (e) {
+      if (e.status === 401 && state.gh.fromLogin) {
+        errorEl.textContent = 'The shared edit token is invalid or expired — ask the admin to update PREVIEW_EDIT_TOKEN.';
+        btn.disabled = false;
+        return;
+      }
       if (e.status === 401) { state.gh = null; store.set('gh', null); renderEditUI(); }
       errorEl.textContent = e.message;
       btn.disabled = false;
@@ -887,7 +902,7 @@
     if (!state.protected) return;
     box.innerHTML = state.user
       ? `<span class="avatar" style="--h:${hue(state.user)}">${esc(state.user.trim()[0] || '?').toUpperCase()}</span>
-         <span class="acc-name">${esc(state.user)}</span>
+         <span class="acc-name">${esc(state.user)}${state.gh && state.gh.fromLogin ? ' <em class="role">Editor</em>' : ''}</span>
          <button class="icon-btn" id="logout" title="Sign out" aria-label="Sign out">${icon('logout')}</button>`
       : `<button class="signin-btn" id="signin">${icon('lock')}Sign in</button>`;
   }
@@ -954,12 +969,15 @@
     }
     state.protected = true;
     state.access = access;
+    state.gh = null; // on protected sites, editing comes only from an edit-enabled login
     await ensureServiceWorker();
     const key = await PPShared.loadKey();
     const payload = key && await PPShared.unlock(access, key);
     if (key && !payload) await PPShared.clearKey(); // password removed or changed
     if (payload) {
       state.user = payload.name;
+      // Editors get the shared repo token inside their (password-encrypted) payload.
+      state.gh = payload.edit ? { token: payload.edit.token, login: payload.name, fromLogin: true } : null;
       return payload.manifest;
     }
     if (!(access.public || []).length) return null; // nothing to show without a password

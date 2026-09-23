@@ -28,6 +28,7 @@ jobs:
       - run: node scripts/build.js --out dist
         env:
           PREVIEW_ACCESS: ${{ secrets.PREVIEW_ACCESS }}   # passwords/folders JSON; empty = no password
+          PREVIEW_EDIT_TOKEN: ${{ secrets.PREVIEW_EDIT_TOKEN }}   # GitHub token for users with "edit": true
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:

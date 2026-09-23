@@ -40,9 +40,13 @@ if (cfg) {
   console.log(`Built ${manifest.count} playable(s) -> ${path.relative(ROOT, OUT) || OUT}`);
 }
 
-// Surface the access mode on the GitHub Actions run page (never prints passwords).
+// Surface the access mode on the GitHub Actions run page (never prints passwords/tokens).
 if (process.env.GITHUB_ACTIONS) {
-  console.log(cfg
-    ? `::notice title=Access control ON::${cfg.users.length} password(s); public folders: ${cfg.public.join(', ') || 'none'}`
-    : '::warning title=Access control OFF::Secret PREVIEW_ACCESS is empty or not visible to this workflow - the site is public.');
+  if (!cfg) {
+    console.log('::warning title=Access control OFF::Secret PREVIEW_ACCESS is empty or not visible to this workflow - the site is public.');
+  } else {
+    const editors = cfg.users.filter(u => u.edit).map(u => u.name);
+    console.log(`::notice title=Access control ON::${cfg.users.length} password(s); public folders: ${cfg.public.join(', ') || 'none'}; editors: ${editors.join(', ') || 'none'}`);
+    if (editors.length && !cfg.editToken) console.log('::warning title=Editing disabled::Users have "edit": true but secret PREVIEW_EDIT_TOKEN is not set.');
+  }
 }

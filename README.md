@@ -54,17 +54,22 @@ Mở http://localhost:5173 . Thêm/sửa game rồi **F5** là thấy ngay.
 
 ## Đổi tên & upload ngay trên web (Edit mode)
 
-Bấm nút ✏️ cạnh ô tìm kiếm → dán **GitHub token** có quyền ghi repo (làm 1 lần trên mỗi máy):
-1. https://github.com/settings/personal-access-tokens/new → *Fine-grained token*
+Quyền sửa gắn với **mật khẩu đăng nhập**: thêm `"edit": true` cho người được sửa trong `PREVIEW_ACCESS`, họ đăng nhập là sửa được, không phải làm gì thêm.
+
+**Admin làm 1 lần** (GitHub bắt buộc có chìa khoá để ghi vào repo):
+1. https://github.com/settings/personal-access-tokens/new → *Fine-grained token* (Expiration: chọn dài nhất / No expiration)
 2. *Repository access*: Only select repositories → chọn repo này
 3. *Permissions → Contents*: **Read and write** → Generate → copy token
+4. Repo → *Settings → Secrets and variables → Actions* → secret mới tên **`PREVIEW_EDIT_TOKEN`** → dán token → chạy lại workflow
 
-Sau đó:
+Token được **mã hoá bằng mật khẩu** của từng người có `"edit": true`; người chỉ xem không giải mã được. Dùng mật khẩu đủ mạnh cho tài khoản sửa.
+
+Khi đã đăng nhập bằng tài khoản sửa (góc phải có nhãn **Editor**):
 - **Đổi tên**: nút ⋮ trên từng game/thư mục → *Rename*. Game 1 file sẽ đổi tên luôn thumbnail cùng tên.
 - **Upload**: vào thư mục → *Upload files* / *Upload folder*, hoặc kéo-thả file/thư mục vào trang.
 
-Mỗi thao tác = 1 commit lên nhánh `main` (người commit là chủ token) → web tự deploy lại sau ~1 phút, trang hiện thông báo khi xong.
-Token chỉ lưu trong trình duyệt của máy đó; ai không có quyền ghi repo thì không sửa được, kể cả khi biết mật khẩu xem.
+Mỗi thao tác = 1 commit (ghi rõ tên người sửa) → web tự deploy lại sau ~1 phút, trang hiện thông báo khi xong.
+Trang Actions sẽ báo `editors: ...` và cảnh báo nếu có người `"edit": true` mà chưa có `PREVIEW_EDIT_TOKEN`.
 
 ## Mật khẩu & phân quyền thư mục
 
@@ -75,7 +80,7 @@ Mỗi mật khẩu được xem một số thư mục nhất định. Khi đã b
    {
      "public": ["Demo/Puzzle"],
      "users": [
-       { "name": "Admin",    "password": "mat-khau-admin", "folders": ["*"] },
+       { "name": "Admin",    "password": "mat-khau-admin", "folders": ["*"], "edit": true },
        { "name": "Client A", "password": "mat-khau-a",     "folders": ["ClientA", "Demo/Runner"] }
      ]
    }
@@ -83,6 +88,7 @@ Mỗi mật khẩu được xem một số thư mục nhất định. Khi đã b
    - `folders`: đường dẫn trong `games/`; `"*"` = tất cả. Được quyền thư mục cha là xem được mọi thư mục con.
    - `public` (tuỳ chọn): các thư mục ai cũng xem được, không cần mật khẩu. Nếu bỏ trống, vào trang là phải đăng nhập ngay.
    - Mỗi người một mật khẩu khác nhau. `name` là tên hiển thị góc phải sau khi đăng nhập.
+   - `edit: true` (tuỳ chọn): người này được đổi tên / upload trên web (cần `PREVIEW_EDIT_TOKEN`, xem mục trên).
 2. **GitHub**: *Settings → Secrets and variables → Actions → New repository secret*, tên `PREVIEW_ACCESS`, dán nguyên JSON trên vào → chạy lại workflow.
    **GitLab**: *Settings → CI/CD → Variables*, key `PREVIEW_ACCESS` (tích *Protect*, không cần *Mask*).
 3. Đổi mật khẩu / thêm người / đổi quyền: sửa secret rồi chạy lại workflow. Mật khẩu cũ mất hiệu lực ngay sau lần deploy đó.

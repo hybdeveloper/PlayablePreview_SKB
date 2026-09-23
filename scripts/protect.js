@@ -36,14 +36,16 @@ function loadConfig(root) {
   const users = (cfg.users || []).map((u, i) => {
     if (!u || typeof u.password !== 'string' || !u.password) throw new Error(`${source}: users[${i}] needs a "password"`);
     const folders = (Array.isArray(u.folders) ? u.folders : [u.folders || '*']).map(norm);
-    return { name: String(u.name || `User ${i + 1}`), password: u.password, folders };
+    return { name: String(u.name || `User ${i + 1}`), password: u.password, folders, edit: u.edit === true };
   });
   const passwords = new Set();
   for (const u of users) {
     if (passwords.has(u.password)) throw new Error(`${source}: two users share the same password`);
     passwords.add(u.password);
   }
-  return { source, users, public: (cfg.public || []).map(norm), salt: cfg.salt || DEFAULT_SALT };
+  // Token that edit-enabled users get (encrypted with their password) to rename/upload from the page.
+  const editToken = (process.env.PREVIEW_EDIT_TOKEN || cfg.editToken || "").trim() || null;
+  return { source, users, public: (cfg.public || []).map(norm), salt: cfg.salt || DEFAULT_SALT, editToken };
 }
 
 function encrypt(key, data) {
@@ -124,9 +126,10 @@ function writeProtected({ cfg, manifest, gamesDir, outDir }) {
     const userKeys = Object.fromEntries(scopes.filter(s => isUnder(s, u.folders))
       .map(s => [s, { e: keys[s].e.toString('base64'), m: keys[s].m.toString('base64') }]));
     const payload = { name: u.name, manifest: { generatedAt: manifest.generatedAt, count: countGames(root), root, repo: manifest.repo }, keys: userKeys };
+    if (u.edit && cfg.editToken) payload.edit = { token: cfg.editToken };
     const key = crypto.pbkdf2Sync(u.password, salt, ITERATIONS, 32, 'sha256');
     const { iv, ct } = encrypt(key, Buffer.from(JSON.stringify(payload)));
-    console.log(`  - ${u.name}: ${u.folders.map(f => f || '*').join(', ')} (${payload.manifest.count} playables)`);
+    console.log(`  - ${u.name}: ${u.folders.map(f => f || "*").join(", ")} (${payload.manifest.count} playables)${payload.edit ? ", can edit" : ""}`);
     return { iv: iv.toString('base64'), ct: ct.toString('base64') };
   });
   entries.sort(() => Math.random() - 0.5); // order must not reveal which entry is whose
