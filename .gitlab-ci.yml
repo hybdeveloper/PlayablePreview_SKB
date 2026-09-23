@@ -1,5 +1,5 @@
 pages:
-  image: node:20
+  image: node:22
   stage: deploy
   variables:
     GIT_DEPTH: 0   # full history -> real "Modified" dates
