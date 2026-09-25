@@ -81,12 +81,20 @@
   function hue(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
 
   let toastTimer;
-  function toast(msg) {
+  function toast(msg, link) {
     const t = $('#toast');
     t.textContent = msg;
+    t.classList.toggle('has-link', !!link);
+    if (link) {
+      const a = document.createElement('a');
+      a.href = link; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = 'Open link';
+      a.addEventListener('click', () => t.classList.remove('show'));
+      t.append(' ', a);
+    }
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+    toastTimer = setTimeout(() => t.classList.remove('show'), link ? 8000 : 2400);
   }
 
   /* ---------- state ---------- */
@@ -251,13 +259,13 @@
     if (folders.length) {
       html += `<h2 class="section-title">Folders</h2><div class="folder-grid">${folders.map(f => {
         const n = countGames(f);
-        return `<a class="folder-card" href="${href.folder(f.path)}" title="${esc(f.path)}">
+        return `<a class="folder-card" href="${href.folder(f.path)}" data-node="${esc(f.path)}" data-type="folder" title="${esc(f.path)}">
           ${icon('folder', 'folder-ic')}<span class="fc-name">${esc(f.name)}</span><span class="fc-meta">${n}</span>${moreBtn(f)}</a>`;
       }).join('')}</div>`;
     }
     if (games.length) {
       html += `<h2 class="section-title">Playables</h2><div class="game-grid">${games.map(g => `
-        <a class="game-card" href="${href.play(g.path)}" title="${esc(g.path)}">
+        <a class="game-card" href="${href.play(g.path)}" data-node="${esc(g.path)}" data-type="game" title="${esc(g.path)}">
           <div class="thumb">${thumbHTML(g)}<span class="play-badge">${icon('play')}</span>${moreBtn(g)}
             ${g.kind === 'folder' ? '<span class="kind-badge">folder</span>' : ''}</div>
           <div class="gc-foot">${htmlIcon}<div class="gc-text"><span class="gc-name">${esc(g.title)}</span>
@@ -276,9 +284,9 @@
       ${items.map(n => {
         const isFolder = n.type === 'folder';
         const loc = parentPath(n.path);
-        return `<a class="list-row" href="${isFolder ? href.folder(n.path) : href.play(n.path)}" title="${esc(n.path)}">
+        return `<a class="list-row" href="${isFolder ? href.folder(n.path) : href.play(n.path)}" data-node="${esc(n.path)}" data-type="${n.type}" title="${esc(n.path)}">
           <span class="lr-name">${isFolder ? icon('folder', 'folder-ic') : htmlIcon}<span>${esc(isFolder ? n.name : n.title)}</span>
-            ${!isFolder && n.kind === 'folder' ? '<em class="tag">folder</em>' : ''}</span>${moreBtn(n)}
+            ${!isFolder && n.kind === 'folder' ? '<em class="tag">folder</em>' : ''}${moreBtn(n)}</span>
           ${withLocation ? `<span class="lr-loc">${icon('folder', 'folder-ic sm')}${esc(loc || state.manifest.root.name)}</span>` : ''}
           <span class="lr-date">${fmtDate(n.modified)}</span>
           <span class="lr-size">${isFolder ? countGames(n) + ' items' : fmtSize(n.size)}</span>
@@ -415,13 +423,36 @@
     while (els.log.children.length > 200) els.log.lastChild.remove();
   }
 
+  // Only store/web links: a javascript: URL opened from this page would run
+  // with the preview's origin (and the GitHub token it holds).
+  function ctaLink(url) {
+    try {
+      const u = new URL(url, location.href);
+      return /^(https?|itms-apps|itms-appss|market):$/.test(u.protocol) ? u.href : null;
+    } catch { return null; }
+  }
+
+  // The stub opens the link from the ad's click gesture when it can. If the
+  // browser blocked that, retry here (user activation carries to the parent
+  // frame in Chrome/Firefox), and fall back to a clickable link.
+  function receiveCta(d) {
+    const link = d.url ? ctaLink(d.url) : null;
+    if (!state.openCta || !link) return toast('CTA clicked → ' + d.detail);
+    if (d.opened) return toast('CTA → opening ' + link);
+    let w = null;
+    try { w = window.open(link, '_blank'); } catch { /* blocked */ }
+    if (w) { try { w.opener = null; } catch { /* cross-origin */ } return toast('CTA → opening ' + link); }
+    log('warn', 'Popup blocked for ' + link);
+    toast('CTA → popup blocked.', link);
+  }
+
   function onFrameMessage(e) {
     if (!state.frameEl || e.source !== state.frameEl.contentWindow) return;
     const d = e.data;
     if (!d || d.__pp !== 1) return;
     log(d.type, d.detail);
     if (d.type === 'cta') {
-      toast((state.openCta ? 'CTA → opening ' : 'CTA clicked → ') + d.detail);
+      receiveCta(d);
       els.device.classList.remove('cta-flash');
       void els.device.offsetWidth;
       els.device.classList.add('cta-flash');
@@ -649,18 +680,24 @@
     store.set('gh', state.gh);
   }
 
-  function openMenu(btn) {
-    const node = btn.dataset.type === 'folder' ? state.folders.get(btn.dataset.menu) : state.games.get(btn.dataset.menu);
+  const nodeOf = (path, type) => (type === 'folder' ? state.folders.get(path) : state.games.get(path));
+  const nodeHref = node => (node.type === 'folder' ? href.folder(node.path) : href.play(node.path));
+
+  // Opened from the ⋮ button (anchored below it) or by right-click (at the cursor).
+  function openMenu(node, at) {
     if (!node) return;
     const menu = $('#menu');
-    menu.innerHTML = `<button data-act="rename">${icon('edit')}Rename</button>
-      <button data-act="copy">${icon('link')}Copy link</button>`;
+    menu.innerHTML = `<button data-act="open">${icon(node.type === 'folder' ? 'folder' : 'play')}Open</button>
+      <button data-act="newtab">${icon('openNew')}Open in new tab</button>
+      <button data-act="copy">${icon('link')}Copy link</button>
+      ${isEditing() && node.path ? `<hr><button data-act="rename">${icon('edit')}Rename</button>` : ''}`;
     menu.dataset.path = node.path;
     menu.dataset.type = node.type;
     menu.hidden = false;
-    const r = btn.getBoundingClientRect();
-    menu.style.top = Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - 8) + 'px';
-    menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8)) + 'px';
+    const x = at.rect ? at.rect.right - menu.offsetWidth : at.x;
+    const y = at.rect ? at.rect.bottom + 4 : at.y;
+    menu.style.top = Math.max(8, Math.min(y, innerHeight - menu.offsetHeight - 8)) + 'px';
+    menu.style.left = Math.max(8, Math.min(x, innerWidth - menu.offsetWidth - 8)) + 'px';
   }
   const closeMenu = () => { $('#menu').hidden = true; };
 
@@ -848,8 +885,14 @@
       if (!b) return;
       e.preventDefault();
       e.stopPropagation();
-      openMenu(b);
+      openMenu(nodeOf(b.dataset.menu, b.dataset.type), { rect: b.getBoundingClientRect() });
     }, true);
+    content.addEventListener('contextmenu', e => {
+      const el = e.target.closest('[data-node]');
+      if (!el) return;
+      e.preventDefault();
+      openMenu(nodeOf(el.dataset.node, el.dataset.type), { x: e.clientX, y: e.clientY });
+    });
     content.addEventListener('dragover', e => {
       if (!isEditing() || state.route.name !== 'folder' || ![...e.dataTransfer.types].includes('Files')) return;
       e.preventDefault();
@@ -867,16 +910,19 @@
       const b = e.target.closest('[data-act]');
       if (!b) return;
       const m = $('#menu');
-      const node = m.dataset.type === 'folder' ? state.folders.get(m.dataset.path) : state.games.get(m.dataset.path);
+      const node = nodeOf(m.dataset.path, m.dataset.type);
       closeMenu();
       if (!node) return;
+      if (b.dataset.act === 'open') location.hash = nodeHref(node);
+      if (b.dataset.act === 'newtab') window.open(absUrl(nodeHref(node)), '_blank', 'noopener');
       if (b.dataset.act === 'rename') openRename(node);
       if (b.dataset.act === 'copy') {
-        const link = absUrl(node.type === 'folder' ? href.folder(node.path) : href.play(node.path));
+        const link = absUrl(nodeHref(node));
         navigator.clipboard.writeText(link).then(() => toast('Link copied'), () => window.prompt('Copy link', link));
       }
     });
     document.addEventListener('click', e => { if (!e.target.closest('#menu, [data-menu]')) closeMenu(); });
+    document.addEventListener('contextmenu', e => { if (!e.target.closest('#menu, [data-node]')) closeMenu(); });
     document.addEventListener('scroll', closeMenu, true);
 
     $('#modal').addEventListener('click', e => {

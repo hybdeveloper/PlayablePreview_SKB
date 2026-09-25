@@ -3,17 +3,27 @@
 (function () {
   if (window.__ppStub) return;
   window.__ppStub = true;
-  var post = function (type, detail) {
-    try { parent.postMessage({ __pp: 1, type: type, detail: String(detail == null ? '' : detail) }, '*'); } catch (e) { /* ignore */ }
+  var post = function (type, detail, extra) {
+    var msg = { __pp: 1, type: type, detail: String(detail == null ? '' : detail) };
+    for (var k in extra) msg[k] = extra[k];
+    try { parent.postMessage(msg, '*'); } catch (e) { /* ignore */ }
   };
   var listeners = {}, state = 'loading', viewable = false;
-  // CTA opens the real store link (from the click gesture inside the ad, so
-  // popup blockers allow it) unless the preview's "Open CTA links" is off.
+  // CTA tries the real store link here first, inside the ad's click gesture, so
+  // popup blockers allow it (unless the preview's "Open CTA links" is off).
+  // The preview page receives the 'cta' message and opens the link itself, or
+  // offers a button, when this was blocked.
   var nativeOpen = window.open;
-  var openLink = function (url) {
-    var allow = true;
+  var cta = function (via, url) {
+    var allow = true, opened = false;
     try { allow = parent.PP_OPEN_CTA !== false; } catch (e) { /* cross-origin parent */ }
-    if (allow && url) { try { nativeOpen.call(window, url, '_blank', 'noopener'); } catch (e) { /* blocked */ } }
+    if (allow && url) {
+      try {
+        var w = nativeOpen.call(window, url, '_blank');
+        if (w) { opened = true; try { w.opener = null; } catch (e) { /* cross-origin */ } }
+      } catch (e) { /* blocked */ }
+    }
+    post('cta', via + '(' + (url || '') + ')', { url: url ? String(url) : '', opened: opened });
   };
   var orientation = { allowOrientationChange: true, forceOrientation: 'none' };
   var size = function () { return { width: window.innerWidth, height: window.innerHeight }; };
@@ -51,7 +61,7 @@
       if (!listeners[ev]) return;
       listeners[ev] = fn ? listeners[ev].filter(function (f) { return f !== fn; }) : [];
     },
-    open: function (url) { post('cta', 'mraid.open(' + (url || '') + ')'); openLink(url); },
+    open: function (url) { cta('mraid.open', url); },
     close: function () { post('close', 'mraid.close()'); },
     unload: function () { post('close', 'mraid.unload()'); },
     expand: function () { post('mraid', 'expand()'); },
@@ -62,7 +72,7 @@
     createCalendarEvent: function () { post('mraid', 'createCalendarEvent()'); },
   };
   if (!window.ExitApi) window.ExitApi = { exit: function () { post('cta', 'ExitApi.exit()'); } };
-  window.open = function (url) { post('cta', 'window.open(' + (url || '') + ')'); openLink(url); return null; };
+  window.open = function (url) { cta('window.open', url); return null; };
   window.addEventListener('error', function (e) {
     var t = e.target;
     if (t && t !== window && (t.src || t.href)) post('error', 'Failed to load ' + (t.src || t.href));

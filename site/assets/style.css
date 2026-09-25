@@ -183,6 +183,8 @@ button.caret:hover { background: var(--line); }
   opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.show.has-link { pointer-events: auto; }
+.toast a { color: #8ab4f8; font-weight: 600; margin-left: 8px; }
 
 /* ---------- access ---------- */
 .account { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
@@ -251,6 +253,7 @@ body.locked .login { background: var(--bg); backdrop-filter: none; }
 .menu button { width: 100%; display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 16px; border: 0; background: none; text-align: left; }
 .menu button:hover { background: var(--hover); }
 .menu .i { width: 18px; height: 18px; color: var(--muted); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
 
 .modal { position: fixed; inset: 0; z-index: 65; display: grid; place-items: center; padding: 16px; background: rgba(8, 10, 16, .45); }
 .modal-card {
@@ -314,7 +317,12 @@ body.locked .login { background: var(--bg); backdrop-filter: none; }
 .device.cta-flash { animation: cta .7s ease-out; }
 @keyframes cta { 0% { box-shadow: 0 0 0 2px #2c3039, 0 0 0 7px #16181e, 0 0 0 7px rgba(52, 120, 246, .9); } 100% { box-shadow: 0 0 0 2px #2c3039, 0 0 0 7px #16181e, 0 0 0 40px rgba(52, 120, 246, 0); } }
 .screen { position: relative; overflow: hidden; background: #000; }
-.screen iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: #000; }
+/* iOS Safari sizes iframes to their content and ignores width/height: 100%;
+   a 1px size with min-* 100% pins it to the screen instead. */
+.screen iframe {
+  position: absolute; top: 0; left: 0; width: 1px; min-width: 100%; height: 1px; min-height: 100%;
+  border: 0; display: block; background: #000;
+}
 .notch { position: absolute; z-index: 2; pointer-events: none; background: #000; }
 .notch.none { display: none; }
 .notch.island { top: 11px; left: 50%; width: 120px; height: 34px; border-radius: 20px; transform: translateX(-50%); }
@@ -375,7 +383,7 @@ body.locked .login { background: var(--bg); backdrop-filter: none; }
 .log .log-cta b { color: #4ea1ff; }
 .log .log-cta span { color: #cfe2ff; }
 .log .log-error b, .log .log-error span { color: #ff7b72; }
-.log .log-console b { color: #f5a524; }
+.log .log-console b, .log .log-warn b { color: #f5a524; }
 .log .log-close b { color: #c297ff; }
 .log .log-event b { color: #4ec77a; }
 
@@ -386,7 +394,7 @@ body.locked .login { background: var(--bg); backdrop-filter: none; }
   .menu-btn { display: inline-grid; }
   .brand { width: auto; font-size: 18px; }
   .brand span:last-child { display: none; }
-  .search { height: 44px; }
+  .search { height: 44px; min-width: 0; padding-left: 12px; }
   .sidebar {
     position: fixed; z-index: 20; top: 0; bottom: 0; left: 0; width: 280px; background: var(--bg);
     transform: translateX(-100%); transition: transform .2s; box-shadow: var(--shadow); padding-top: 16px;
@@ -394,8 +402,16 @@ body.locked .login { background: var(--bg); backdrop-filter: none; }
   body.drawer-open .sidebar { transform: none; }
   body.drawer-open .scrim { display: block; position: fixed; inset: 0; z-index: 19; background: rgba(0, 0, 0, .35); }
   .main { margin: 0; border-radius: 16px 16px 0 0; }
-  .toolbar { padding: 8px 8px 4px 16px; }
-  .crumbs { font-size: 18px; flex-basis: 100%; }
+  /* One toolbar row: current folder name + sort/view controls. */
+  .toolbar { gap: 4px; min-height: 56px; padding: 6px 8px 2px 16px; }
+  .crumbs { font-size: 18px; flex: 1 1 0; }
+  .crumbs > :not(:last-child) { display: none; }
+  .crumbs > :last-child { margin-left: -8px; flex-shrink: 1; }
+  .crumbs a, .crumbs span { padding: 4px 8px; }
+  .edit-actions { order: 3; flex-basis: 100%; }
+  .toolbar-actions select { padding: 0 4px; }
+  .seg { margin-left: 2px; }
+  .seg button { padding: 0 10px; }
   .toolbar-actions { margin-left: auto; }
   .content { padding: 0 12px 16px; }
   .folder-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
@@ -403,6 +419,8 @@ body.locked .login { background: var(--bg); backdrop-filter: none; }
   .list, .list.with-loc { --cols: minmax(0, 1fr) 90px; }
   .lr-date, .lr-loc, .lh-modified, .lh-loc { display: none !important; }
   .acc-name { display: none; }
+  /* iOS zooms into any focused field under 16px and stays zoomed in. */
+  select, input { font-size: 16px !important; }
 
   .player-bar { padding: 0 4px; }
   .player-actions #pOpen, .player-actions #pCopy, .player-actions #pRotate { display: none; }
