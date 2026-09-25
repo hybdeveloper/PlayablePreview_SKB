@@ -393,8 +393,8 @@
     if (token !== state.loadToken) return;
 
     renderChecks(g, html);
-    // Protected builds: the service worker decrypts files and injects the stub itself.
-    if (state.protected) frame.src = url + (state.inject ? '?pp_inject=1' : '');
+    // Protected / remote builds: the service worker fetches or decrypts files and injects the stub itself.
+    if (state.protected || state.manifest.source) frame.src = url + (state.inject ? '?pp_inject=1' : '');
     else if (state.inject && html != null) frame.srcdoc = PPShared.injectHtml(html, absUrl(url));
     else frame.src = url;
     frame.addEventListener('load', () => {
@@ -424,8 +424,8 @@
   }
 
   function renderQR(g) {
-    // Protected games only open inside the app (after sign-in), so link the preview page.
-    const locked = state.protected && !PPShared.isUnder(g.path, state.access.public || []);
+    // Protected and remote games only open inside the app (its service worker serves them), so link the preview page.
+    const locked = !!state.manifest.source || (state.protected && !PPShared.isUnder(g.path, state.access.public || []));
     const url = locked ? absUrl(href.play(g.path)) : absUrl(gameUrl(g));
     const box = $('#qr');
     if (window.qrcode) {
@@ -808,6 +808,34 @@
       <div class="modal-actions"><button class="pill-btn" data-act="close">Cancel</button><button class="pill-btn danger" data-act="delete" data-path="${esc(node.path)}" data-type="${node.type}">Delete</button></div>`);
   }
 
+  // Delete closes the dialog at once and hides the item right away; the commit
+  // runs in the background. Deletes are chained so quick successive ones don't
+  // race each other for the branch head.
+  let deleteChain = Promise.resolve();
+  function startDelete(node) {
+    closeModal();
+    if (!node) return;
+    const parent = state.folders.get(parentPath(node.path));
+    if (parent) parent.children = parent.children.filter(c => c !== node);
+    for (const map of [state.games, state.folders]) for (const k of [...map.keys()]) if (under(k, node.path)) map.delete(k);
+    if (!state.current) render();
+    toast(`Deleting ${node.name}…`);
+    state.pendingChanges = (state.pendingChanges || 0) + 1;
+    deleteChain = deleteChain.then(async () => {
+      try {
+        const msg = await doDelete(node);
+        toast('Saved: ' + msg);
+        awaitDeploy();
+      } catch (e) {
+        const hint = e.status === 401 && state.gh.fromLogin ? ' — the shared edit token is invalid or expired; ask the admin to update PREVIEW_EDIT_TOKEN.' : '';
+        banner(`${icon('warn')}<span>Could not delete ${esc(node.path)}: ${esc(e.message + hint)}</span>`, 'warn');
+        refreshData(); // bring the item back
+      } finally {
+        state.pendingChanges--;
+      }
+    });
+  }
+
   async function doDelete(node) {
     if (!canChange(node)) throw new Error('You do not have permission to delete this');
     const paths = [node.path, pairedThumb(node)].filter(Boolean);
@@ -1111,6 +1139,7 @@
     const started = Date.now();
     const tick = async () => {
       if (upQueue.busy) { state.deploying = false; state.deployAfterQueue = true; return; }
+      if (state.pendingChanges) return setTimeout(tick, 3000); // a delete is still committing
       try {
         const m = await (await fetch('manifest.json?t=' + Date.now(), { cache: 'no-store' })).json();
         if (m.generatedAt > state.lastEdit) {
@@ -1255,7 +1284,7 @@
       if (b.dataset.act === 'close') closeModal();
       if (b.dataset.act === 'disconnect') { state.gh = null; store.set('gh', null); closeModal(); renderEditUI(); renderMain(); toast('Edit mode off'); }
       if (b.dataset.act === 'upload') enqueueUpload();
-      if (b.dataset.act === 'delete') runAction(b, $('#delError'), () => doDelete(nodeOf(b.dataset.path, b.dataset.type)));
+      if (b.dataset.act === 'delete') startDelete(nodeOf(b.dataset.path, b.dataset.type));
       if (b.dataset.act === 'users') openUsers();
       if (b.dataset.act === 'user-add') addUserRow();
       if (b.dataset.act === 'user-del') b.closest('.user-row').remove();
@@ -1376,7 +1405,9 @@
     if (!access) {
       const res = await fetch('manifest.json', { cache: 'no-cache' });
       if (!res.ok) throw new Error('manifest.json: HTTP ' + res.status);
-      return res.json();
+      const m = await res.json();
+      if (m.source) await ensureServiceWorker(); // it fetches the games from GitHub
+      return m;
     }
     state.protected = true;
     state.access = access;

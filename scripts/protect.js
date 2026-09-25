@@ -101,7 +101,9 @@ function folderExists(manifest, p) {
 }
 
 // Writes games/ (public files only), g/*.bin, access.json and a public-only manifest.json.
-function writeProtected({ cfg, manifest, gamesDir, outDir }) {
+// remote: games are fetched from GitHub on demand, so no game files are written;
+// the folder keys still decide which playables each user may open.
+function writeProtected({ cfg, manifest, gamesDir, outDir, remote }) {
   for (const p of [...cfg.public, ...cfg.users.flatMap(u => u.folders)]) {
     if (!folderExists(manifest, p)) console.warn(`  ! folder "${p}" does not exist in games/`);
   }
@@ -111,7 +113,7 @@ function writeProtected({ cfg, manifest, gamesDir, outDir }) {
   const scopeOf = p => scopes.filter(s => isUnder(p, [s])).sort((a, b) => b.length - a.length)[0];
 
   let pub = 0, enc = 0;
-  if (fs.existsSync(gamesDir)) {
+  if (!remote && fs.existsSync(gamesDir)) {
     fs.mkdirSync(path.join(outDir, 'g'), { recursive: true });
     for (const rel of listFiles(gamesDir)) {
       const src = path.join(gamesDir, rel);
@@ -132,14 +134,14 @@ function writeProtected({ cfg, manifest, gamesDir, outDir }) {
 
   const publicVisible = p => isUnder(p, cfg.public);
   const publicRoot = prune(manifest.root, publicVisible) || { ...manifest.root, children: [] };
-  fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({ generatedAt: manifest.generatedAt, count: countGames(publicRoot), root: publicRoot, repo: manifest.repo }));
+  fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({ generatedAt: manifest.generatedAt, count: countGames(publicRoot), root: publicRoot, repo: manifest.repo, source: manifest.source }));
 
   const salt = crypto.createHash('sha256').update(cfg.salt).digest();
   const entries = cfg.users.map(u => {
     const root = prune(manifest.root, p => publicVisible(p) || isUnder(p, u.folders)) || { ...manifest.root, children: [] };
     const userKeys = Object.fromEntries(scopes.filter(s => isUnder(s, u.folders))
       .map(s => [s, { e: keys[s].e.toString('base64'), m: keys[s].m.toString('base64') }]));
-    const payload = { name: u.name, role: u.role, manifest: { generatedAt: manifest.generatedAt, count: countGames(root), root, repo: manifest.repo }, keys: userKeys };
+    const payload = { name: u.name, role: u.role, manifest: { generatedAt: manifest.generatedAt, count: countGames(root), root, repo: manifest.repo, source: manifest.source }, keys: userKeys };
     if (u.role !== 'viewer' && cfg.editToken) payload.edit = { token: cfg.editToken };
     // Owners edit the user list from the page, which rewrites the whole PREVIEW_ACCESS secret.
     if (u.role === 'owner') payload.config = cfg.raw;

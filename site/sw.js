@@ -1,6 +1,10 @@
-/* Service worker for password-protected builds: serves games/<path> by
- * decrypting g/<id>.bin with the viewer's folder keys, so multi-file games
- * (scripts, images, audio) work unchanged. In open builds it passes through. */
+/* Service worker that serves games/<path>:
+ *  - remote builds (manifest.source): fetches each file from GitHub at the
+ *    build's commit only when a playable asks for it; responses are no-store,
+ *    so nothing stays behind once the player is closed;
+ *  - password-protected bundled builds: decrypts g/<id>.bin with the viewer's
+ *    folder keys, so multi-file games (scripts, images, audio) work unchanged.
+ * Otherwise it passes through. */
 importScripts('assets/shared.js');
 
 const BASE = self.registration.scope;
@@ -17,15 +21,20 @@ const MIME = {
 };
 const mime = p => MIME[(p.split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
 const isHtml = p => /\.html?$/i.test(p);
+const encPath = p => p.split('/').map(encodeURIComponent).join('/');
 
-let session = null;
+let session = null, source;
 const getSession = () => session || (session = PPShared.loadSession().catch(() => (session = null, { open: true })));
+// Where remote builds keep their games (manifest.source.base); null for bundled builds.
+const getSource = () => source || (source = fetch(BASE + 'manifest.json', { cache: 'no-cache' })
+  .then(r => (r.ok ? r.json() : {})).then(m => (m.source && m.source.base) || null)
+  .catch(() => (source = undefined, null)));
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('message', e => {
   const t = e.data && e.data.type;
-  if (t === 'refresh') session = null;
+  if (t === 'refresh') { session = null; source = undefined; }
   if (t === 'claim') e.waitUntil(self.clients.claim());
 });
 
@@ -45,23 +54,30 @@ function page(status, title, text) {
 }
 
 async function serve(url, request) {
-  const s = await getSession();
-  if (s.open) return fetch(request);
+  const [s, remote] = await Promise.all([getSession(), getSource()]);
+  if (s.open && !remote) return fetch(request);
 
   let path = url.pathname.slice(GAMES_PATH.length);
   try { path = decodeURIComponent(path); } catch { /* keep raw */ }
   if (path.endsWith('/') || path === '') path += 'index.html';
   const inject = url.searchParams.has('pp_inject') && isHtml(path);
+  const locked = !s.open && !PPShared.isUnder(path, s.access.public || []) && !PPShared.findScope(s.keys, path);
+  if (locked) return page(403, 'Locked', s.payload ? 'Your account does not give access to this playable.' : 'Sign in to view this playable.');
 
   let body;
-  if (PPShared.isUnder(path, s.access.public || [])) {
+  if (remote) {
+    let res;
+    try { res = await fetch(remote + encPath(path), { cache: 'no-store' }); } catch { return page(502, 'Offline', 'Could not reach GitHub to load ' + path); }
+    if (!res.ok) return page(res.status === 404 ? 404 : 502, res.status === 404 ? 'Not found' : 'Could not load', path);
+    if (!inject) return new Response(res.body, { headers: { 'content-type': mime(path), 'cache-control': 'no-store' } });
+    body = await res.arrayBuffer();
+  } else if (PPShared.isUnder(path, s.access.public || [])) {
     if (!inject) return fetch(request);
     const res = await fetch(url.origin + url.pathname);
     if (!res.ok) return res;
     body = await res.arrayBuffer();
   } else {
     const k = PPShared.findScope(s.keys, path);
-    if (!k) return page(403, 'Locked', s.payload ? 'Your password does not give access to this playable.' : 'Sign in to view this playable.');
     const res = await fetch(await PPShared.blobUrl(k, path));
     if (!res.ok) return page(404, 'Not found', path);
     try { body = await PPShared.decryptBlob(k, await res.arrayBuffer()); } catch { return page(500, 'Could not decrypt', 'Reload the preview and try again.'); }

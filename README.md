@@ -88,7 +88,7 @@ Trang Actions sẽ báo ai được sửa và cảnh báo nếu có owner/admin/
 
 ## Mật khẩu & phân quyền thư mục
 
-Mỗi tài khoản (tên đăng nhập + mật khẩu) được xem một số thư mục nhất định. Khi đã bật, file game private được **mã hoá AES-256** lúc build (tên file cũng bị thay bằng mã băm), nên tải trộm về cũng không đọc được.
+Mỗi tài khoản (tên đăng nhập + mật khẩu) chỉ thấy và mở được một số thư mục nhất định. Lưu ý: game được tải thẳng từ repo (xem mục *Tải game khi mở* bên dưới), nên nếu repo public thì ai có link GitHub vẫn đọc được file game; mật khẩu chỉ giới hạn những gì hiện trên trang. Muốn file game được **mã hoá AES-256** lúc build như trước, đặt biến `PREVIEW_GAMES=bundle` cho workflow.
 
 1. Viết cấu hình (xem mẫu [access.example.json](access.example.json)):
    ```json
@@ -137,3 +137,10 @@ Muốn thử bản có mật khẩu trên máy: tạo file `access.config.json` 
 ## Lưu ý
 - GitHub Pages giới hạn ~1 GB/site, file < 100 MB. Nếu có nhiều asset nặng, cân nhắc Git LFS (workflow đã bật `lfs: true`).
 - Game được chạy cùng origin với trang web (cần để giả lập MRAID); chỉ nên để game của team trong repo.
+
+## Tải game khi mở
+
+Mặc định (repo GitHub) build **không copy game vào site** nữa, chỉ tạo danh sách, nên deploy nhanh và không phụ thuộc dung lượng thư mục `games/`. Khi mở một playable, service worker của trang tải từng file của game đó từ `raw.githubusercontent.com`, cố định theo commit của lần build. File tải về không được lưu lại (`no-store`); đóng player là game bị gỡ khỏi trang.
+
+- Link QR / link chia sẻ trỏ vào trang preview (game chỉ chạy được qua service worker của trang).
+- Muốn quay về kiểu cũ (copy/mã hoá game vào site), đặt `PREVIEW_GAMES: bundle` trong `env` của bước build trong workflow. Repo private hoặc GitLab thì bắt buộc dùng kiểu này.

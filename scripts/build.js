@@ -20,14 +20,31 @@ if (OUT === ROOT || OUT === SITE || OUT === GAMES) throw new Error(`Refusing to 
 const cfg = loadConfig(ROOT);
 const manifest = buildManifest(GAMES);
 
+// Remote games (default for public GitHub repos): the build ships only the list;
+// the service worker (site/sw.js) fetches each file from GitHub at this exact
+// commit when a playable is opened, and nothing is kept once it is closed.
+// PREVIEW_GAMES=bundle (or a non-GitHub remote) copies/encrypts games/ into the site instead.
+const r = manifest.repo;
+const remote = process.env.PREVIEW_GAMES !== 'bundle' && r && r.commit;
+if (remote) {
+  const enc = p => p.split('/').map(encodeURIComponent).join('/');
+  manifest.source = { base: `https://raw.githubusercontent.com/${enc(r.owner)}/${enc(r.name)}/${r.commit}/${r.games ? enc(r.games) + '/' : ''}` };
+}
+
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.cpSync(SITE, OUT, { recursive: true });
 fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
 
 if (cfg) {
   console.log(`Access control ON (${cfg.source}): ${cfg.users.length} password(s), public: ${cfg.public.join(', ') || 'none'}`);
-  const { pub, enc } = writeProtected({ cfg, manifest, gamesDir: GAMES, outDir: OUT });
-  console.log(`Built ${manifest.count} playable(s): ${enc} file(s) encrypted, ${pub} public -> ${path.relative(ROOT, OUT) || OUT}`);
+  const { pub, enc } = writeProtected({ cfg, manifest, gamesDir: GAMES, outDir: OUT, remote });
+  console.log(remote
+    ? `Built ${manifest.count} playable(s), loaded on demand from ${manifest.source.base}`
+    : `Built ${manifest.count} playable(s): ${enc} file(s) encrypted, ${pub} public -> ${path.relative(ROOT, OUT) || OUT}`);
+} else if (remote) {
+  fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(manifest));
+  console.log('Access control OFF (no PREVIEW_ACCESS / access.config.json): everything is public');
+  console.log(`Built ${manifest.count} playable(s), loaded on demand from ${manifest.source.base}`);
 } else {
   if (fs.existsSync(GAMES)) {
     fs.cpSync(GAMES, path.join(OUT, 'games'), {
