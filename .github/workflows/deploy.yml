@@ -48,8 +48,8 @@ jobs:
           PREVIEW_TREE: ${{ runner.temp }}/tree.json
           PREVIEW_ACCESS: ${{ secrets.PREVIEW_ACCESS }}   # passwords/folders JSON; empty = no password
           PREVIEW_EDIT_TOKEN: ${{ secrets.PREVIEW_EDIT_TOKEN }}   # GitHub token for users with "edit": true
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
