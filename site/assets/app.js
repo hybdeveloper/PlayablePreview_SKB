@@ -640,8 +640,8 @@
   const JUNK = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
   const isEditing = () => !!(state.gh && state.manifest && state.manifest.repo);
   const repoPath = p => [state.manifest.repo.games, p].filter(Boolean).join('/');
-  // [skip ci]: web edits don't rebuild the site; the Publish button does.
-  const byline = () => (state.user ? ` (by ${state.user} via Playable Preview)` : ' (via Playable Preview)') + '\n\n[skip ci]';
+  // Every edit commit triggers the deploy workflow; awaitDeploy() refreshes the page when it lands.
+  const byline = () => (state.user ? ` (by ${state.user} via Playable Preview)` : ' (via Playable Preview)');
 
   // Roles are enforced here in the page only: every non-viewer holds the same repo token.
   const ROLES = {
@@ -698,14 +698,14 @@
       modal(`<h2>${icon('edit')}Edit mode</h2>
         <p>You are signed in as <b>${esc(state.user)}</b> <em class="role">${r.label}</em></p>
         <p>${esc(r.desc)}.</p>
-        <p class="muted">Right-click an item (or use its ⋮ button) to rename or delete it; use the upload buttons or drop files anywhere on a folder page. Changes are saved on GitHub and go live when you press Publish.</p>
+        <p class="muted">Right-click an item (or use its ⋮ button) to rename or delete it; use the upload buttons or drop files anywhere on a folder page. Changes are saved on GitHub and the site updates itself in about 30 seconds.</p>
         <div class="modal-actions">${state.config ? `<button class="pill-btn" data-act="users">${icon('people')}Manage users</button>` : ''}<button class="pill-btn primary" data-act="close">Done</button></div>`);
       return;
     }
     if (state.gh) {
       modal(`<h2>${icon('edit')}Edit mode</h2>
         <p>Connected as <b>@${esc(state.gh.login || 'unknown')}</b> to <b>${esc(repoName)}</b> (branch <code>${esc(r.branch)}</code>).</p>
-        <p class="muted">Use the ⋮ button on any item to rename it, or the upload buttons in a folder. Each change is one commit; the site redeploys in about a minute.</p>
+        <p class="muted">Use the ⋮ button on any item to rename it, or the upload buttons in a folder. Each change is one commit; the site updates itself in about 30 seconds.</p>
         <div class="modal-actions"><button class="pill-btn" data-act="disconnect">Disconnect</button><button class="pill-btn primary" data-act="close">Done</button></div>`);
       return;
     }
@@ -772,7 +772,7 @@
 
   async function doRename(node, newBase) {
     newBase = newBase.trim();
-    if (!newBase || /[\\/:*?"<>|]/.test(newBase) || newBase === '.' || newBase === '..') throw new Error('Name cannot be empty or contain \\ / : * ? " < > |');
+    if (!newBase || BAD_CHARS.test(newBase) || newBase === '.' || newBase === '..') throw new Error('Name cannot be empty or contain \\ / : * ? " < > | # %');
     const isFile = node.type === 'game' && node.kind === 'file';
     const ext = isFile ? splitExt(node.name)[1] : '';
     const newName = newBase + ext;
@@ -817,43 +817,158 @@
     return msg;
   }
 
-  // [{ rel, file }] relative to the current folder
+  // Characters that break file names on GitHub/Windows (\ / : * ? " < > |) or links to the file (# %).
+  const BAD_CHARS = /[\\/:*?"<>|#%]/;
+  const cleanName = s => s.replace(/[\\/:*?"<>|#%]+/g, '_').replace(/\s+/g, ' ').trim().replace(/^\.+/, '');
+
+  // [{ rel, file }] relative to the current folder. Each loose file, and each
+  // dropped folder (as a whole), gets a name field so it can be renamed first.
   function openUpload(items) {
     items = items.filter(i => !JUNK.test(i.rel));
     if (!items.length) return;
     const folder = state.route.name === 'folder' ? state.route.path : '';
     const total = items.reduce((s, i) => s + i.file.size, 0);
-    const tooBig = items.filter(i => i.file.size > MAX_UPLOAD_BYTES);
+    const units = [];
+    for (const i of items) {
+      const slash = i.rel.indexOf('/');
+      const key = slash > 0 ? i.rel.slice(0, slash) : i.rel;
+      let u = units.find(x => x.key === key);
+      if (!u) {
+        const [base, ext] = slash > 0 ? [key, ''] : splitExt(key);
+        u = { key, isDir: slash > 0, base, ext, size: 0, count: 0 };
+        units.push(u);
+      }
+      i.unit = u;
+      i.rest = slash > 0 ? i.rel.slice(slash) : '';
+      u.size += i.file.size;
+      u.count++;
+    }
+    state.pendingUpload = { folder, items, units };
+    modal(`<h2>${icon('upload')}Upload ${items.length} file${items.length > 1 ? 's' : ''}</h2>
+      <p>To <b>${esc(folder || state.manifest.root.name)}</b> · ${fmtSize(total)}</p>
+      <ul class="file-list up-list" id="upList">${units.map((u, n) => `<li>${u.isDir ? icon('folder') : htmlIcon}
+        <div class="input-row"><input class="up-name" data-u="${n}" value="${esc(cleanName(u.base) || 'file')}" aria-label="Name for ${esc(u.key)}" spellcheck="false">${u.ext ? `<span class="ext">${esc(u.ext)}</span>` : ''}</div>
+        <small>${u.isDir ? `${u.count} files · ` : ''}${fmtSize(u.size)}</small></li>`).join('')}</ul>
+      <div class="form-error" id="upError"></div>
+      <p class="muted small" id="upNote"></p>
+      <p class="muted small">Rename before uploading if a name clashes or has odd characters. A folder containing index.html becomes one playable.</p>
+      <div class="modal-actions"><button class="pill-btn" data-act="close">Cancel</button><button class="pill-btn primary" data-act="upload" id="upBtn">Upload</button></div>`);
+    $('#upList').oninput = uploadPlan;
+    uploadPlan();
+  }
+
+  // Reads the name fields, shows what is wrong, and returns the final [{ rel, file }] (null if blocked).
+  function uploadPlan() {
+    const { folder, items, units } = state.pendingUpload;
+    const errors = [];
+    const inputs = [...document.querySelectorAll('.up-name')];
+    const names = new Map();
+    inputs.forEach(inp => {
+      const u = units[inp.dataset.u];
+      const base = inp.value.trim();
+      u.name = base + u.ext;
+      const bad = !base || base === '.' || base === '..' || BAD_CHARS.test(base);
+      const dup = names.has(u.name.toLowerCase());
+      names.set(u.name.toLowerCase(), true);
+      inp.classList.toggle('bad', bad || dup);
+      if (bad) errors.push(`"${base || u.key}": name cannot be empty or contain \\ / : * ? " < > | # %`);
+      else if (dup) errors.push(`"${u.name}" is used twice in this upload`);
+    });
+    const plan = items.map(i => ({ rel: i.unit.name + i.rest, file: i.file }));
+    const tooBig = plan.filter(i => i.file.size > MAX_UPLOAD_BYTES);
+    if (tooBig.length) errors.push(`${tooBig.length} file(s) exceed GitHub's 100 MB limit: ${tooBig.map(i => i.rel).join(', ')}`);
     // Replacing a playable counts as changing it: editors may only replace their own.
-    const taken = [...new Set(items.map(i => {
+    const taken = [...new Set(plan.map(i => {
       const p = [folder, i.rel].filter(Boolean).join('/');
       return [...state.games.values()].find(g => (g.kind === 'file' ? g.path === p : under(p, g.path)));
     }).filter(g => g && !canChange(g)))];
-    state.pendingUpload = { folder, items };
-    modal(`<h2>${icon('upload')}Upload ${items.length} file${items.length > 1 ? 's' : ''}</h2>
-      <p>To <b>${esc(folder || state.manifest.root.name)}</b> · ${fmtSize(total)}</p>
-      <ul class="file-list">${items.slice(0, 8).map(i => `<li>${htmlIcon}<span>${esc(i.rel)}</span><small>${fmtSize(i.file.size)}</small></li>`).join('')}
-        ${items.length > 8 ? `<li class="muted">+ ${items.length - 8} more</li>` : ''}</ul>
-      ${tooBig.length ? `<div class="form-error">${tooBig.length} file(s) exceed GitHub's 100 MB limit: ${esc(tooBig.map(i => i.rel).join(', '))}</div>` : ''}
-      ${taken.length ? `<div class="form-error">You cannot replace playables uploaded by someone else: ${esc(taken.map(g => g.name + (g.owner ? ` (${g.owner})` : '')).join(', '))}</div>` : ''}
-      <p class="muted small">Files with the same name are replaced. A folder containing index.html becomes one playable.</p>
-      <div class="progress" id="upProgress" hidden><div></div><span></span></div>
-      <div class="form-error" id="upError"></div>
-      <div class="modal-actions"><button class="pill-btn" data-act="close">Cancel</button><button class="pill-btn primary" data-act="upload" ${tooBig.length || taken.length ? 'disabled' : ''}>Upload</button></div>`);
+    if (taken.length) errors.push(`You cannot replace playables uploaded by someone else: ${taken.map(g => g.name + (g.owner ? ` (${g.owner})` : '')).join(', ')} — rename yours`);
+    const here = state.folders.get(folder);
+    const replaced = units.filter(u => here && here.children.some(c => c.name.toLowerCase() === (u.name || '').toLowerCase()));
+    $('#upError').textContent = errors.join('\n');
+    $('#upNote').textContent = replaced.length ? `Will replace: ${replaced.map(u => u.name).join(', ')}` : '';
+    $('#upBtn').disabled = errors.length > 0;
+    return errors.length ? null : plan;
   }
 
-  async function doUpload() {
-    const { folder, items } = state.pendingUpload;
-    const bar = $('#upProgress');
-    bar.hidden = false;
-    const files = items.map(i => ({ path: repoPath([folder, i.rel].filter(Boolean).join('/')), file: i.file }));
-    const msg = `Upload ${items.length} file${items.length > 1 ? 's' : ''} to ${folder || '/'}`;
-    const meta = state.user ? ownersMeta(o => { for (const i of items) o[[folder, i.rel].filter(Boolean).join('/')] = state.user; }) : undefined;
-    await PPGitHub.upload(state.gh.token, state.manifest.repo, files, msg + byline(), (i, n, name) => {
-      bar.querySelector('div').style.width = Math.round((i / n) * 100) + '%';
-      bar.querySelector('span').textContent = i < n ? `${i + 1}/${n} · ${name.split('/').pop()}` : name;
-    }, meta);
-    return msg;
+  // Upload queue: files go up one at a time; files dropped meanwhile join the
+  // queue. When it runs dry, everything uploaded becomes ONE commit (one deploy)
+  // and only then does the page wait for the build and refresh.
+  const upQueue = { todo: [], done: [], failed: [], total: 0, busy: false };
+
+  function enqueueUpload() {
+    const items = uploadPlan();
+    if (!items) return;
+    const { folder } = state.pendingUpload;
+    for (const i of items) upQueue.todo.push({ folder, path: [folder, i.rel].filter(Boolean).join('/'), file: i.file });
+    upQueue.total += items.length;
+    closeModal();
+    if (upQueue.busy) toast(`Added ${items.length} file${items.length > 1 ? 's' : ''} to the upload queue`);
+    else runUploadQueue();
+  }
+  // Nothing is committed until the queue ends, so leaving early loses the upload.
+  window.addEventListener('beforeunload', e => { if (upQueue.busy) e.preventDefault(); });
+
+  function uploadBanner(text) {
+    const n = upQueue.done.length + upQueue.failed.length;
+    banner(`<span class="spinner"></span><span><b>Uploading ${Math.min(n + 1, upQueue.total)}/${upQueue.total}</b> · ${esc(text)}
+      <span class="progress"><div style="width:${Math.round((n / upQueue.total) * 100)}%"></div></span></span>`, 'busy');
+  }
+
+  async function runUploadQueue() {
+    upQueue.busy = true;
+    const { token } = state.gh, repo = state.manifest.repo;
+    while (upQueue.todo.length) {
+      const item = upQueue.todo.shift();
+      uploadBanner(item.path.split('/').pop());
+      for (let attempt = 0; ; attempt++) {
+        try {
+          item.sha = await PPGitHub.uploadBlob(token, repo, item.file);
+          upQueue.done.push(item);
+          break;
+        } catch (e) {
+          if (attempt < 2 && !(e.status >= 400 && e.status < 500)) continue; // network / 5xx: retry
+          item.error = e.message;
+          upQueue.failed.push(item);
+          break;
+        }
+      }
+    }
+
+    const done = [...new Map(upQueue.done.map(i => [i.path, i])).values()]; // same file twice: last wins
+    const failed = upQueue.failed;
+    let error = '';
+    if (done.length) {
+      banner(`<span class="spinner"></span><span><b>Saving ${done.length} file${done.length > 1 ? 's' : ''}…</b></span>`, 'busy');
+      const folders = [...new Set(done.map(i => i.folder))];
+      const msg = `Upload ${done.length} file${done.length > 1 ? 's' : ''} to ${folders.length === 1 ? folders[0] || '/' : folders.length + ' folders'}`;
+      const meta = state.user ? ownersMeta(o => { for (const i of done) o[i.path] = state.user; }) : undefined;
+      try {
+        await PPGitHub.commitFiles(token, repo, done.map(i => ({ path: repoPath(i.path), sha: i.sha })), msg + byline(), meta);
+        toast('Saved: ' + msg);
+        upQueue.done = [];
+      } catch (e) {
+        error = e.message; // keep the uploaded blobs so Retry only has to commit
+      }
+    }
+    if (upQueue.todo.length && !error) { // files dropped while the commit was being saved
+      upQueue.total = upQueue.todo.length + upQueue.failed.length;
+      return runUploadQueue();
+    }
+    upQueue.failed = [];
+    upQueue.total = upQueue.done.length;
+    upQueue.busy = false;
+
+    const failNote = failed.length
+      ? `${failed.length} file${failed.length > 1 ? 's' : ''} failed to upload: ${failed.map(i => `${i.path} (${i.error})`).join(', ')}`
+      : '';
+    if (error) {
+      banner(`${icon('warn')}<span>Upload could not be saved: ${esc(error)}</span><button class="pill-btn primary" data-act="upload-retry">Retry</button>`, 'warn');
+    } else if (done.length || state.deployAfterQueue) {
+      awaitDeploy(failNote);
+    } else if (failNote) {
+      banner(`${icon('warn')}<span>${esc(failNote)}</span>`, 'warn');
+    }
   }
 
   async function filesFromDrop(dt) {
@@ -882,7 +997,7 @@
   function userRowHTML(u) {
     const r = ROLES[u.role] ? u.role : u.edit === true ? 'owner' : 'viewer';
     return `<div class="user-row">
-      <input class="u-name" placeholder="Name" value="${esc(u.name || '')}" required>
+      <input class="u-name" placeholder="Username" value="${esc(u.name || '')}" required>
       <input class="u-pass" type="password" placeholder="Password" value="${esc(u.password || '')}" autocomplete="new-password" required>
       <select class="u-role" aria-label="Role">${Object.keys(ROLES).map(k => `<option value="${k}"${k === r ? ' selected' : ''}>${ROLES[k].label}</option>`).join('')}</select>
       <input class="u-folders" placeholder="Folders: * or A, B/C" value="${esc(listText(u.folders))}" list="folderList" title="Folders this user can see: * for all, or comma-separated paths">
@@ -894,7 +1009,7 @@
     const cfg = state.config || { users: [] };
     modal(`<h2>${icon('people')}Users &amp; permissions</h2>
       <form id="usersForm" autocomplete="off">
-        <div class="user-head"><span>Name</span><span>Password</span><span>Role</span><span>Folders</span><span></span></div>
+        <div class="user-head"><span>Username</span><span>Password</span><span>Role</span><span>Folders</span><span></span></div>
         <div class="users" id="usersList">${(cfg.users || []).map(userRowHTML).join('')}</div>
         <button type="button" class="pill-btn" data-act="user-add">${icon('add')}Add user</button>
         <label class="switch small"><input type="checkbox" id="showPass"><span></span>Show passwords</label>
@@ -902,7 +1017,7 @@
         <datalist id="folderList"><option value="*">${[...state.folders.keys()].filter(Boolean).map(p => `<option value="${esc(p)}">`).join('')}</datalist>
         <dl class="role-help">${Object.values(ROLES).map(r => `<dt>${r.label}</dt><dd>${esc(r.desc)}</dd>`).join('')}</dl>
         <div class="form-error" id="usersError"></div>
-        <p class="muted small">Saving writes the PREVIEW_ACCESS secret and rebuilds the site (1–2 minutes), which also publishes any unpublished changes. Users whose password changed must sign in again.</p>
+        <p class="muted small">Saving writes the PREVIEW_ACCESS secret and rebuilds the site (under a minute), which also publishes any unpublished changes. Users sign in with their name + password; anyone whose name or password changed must sign in again.</p>
         <div class="modal-actions"><button type="button" class="pill-btn" data-act="close">Cancel</button><button class="pill-btn primary" id="usersBtn">Save &amp; publish</button></div>
       </form>`);
     $('#modalCard').classList.add('wide');
@@ -926,8 +1041,7 @@
     }));
     const problem =
       users.find(u => !u.name || !u.password) ? 'Every user needs a name and a password' :
-      new Set(users.map(u => u.password)).size < users.length ? 'Two users have the same password; passwords identify users, so each must be unique' :
-      new Set(users.map(u => u.name.toLowerCase())).size < users.length ? 'Two users have the same name' :
+      new Set(users.map(u => u.name.toLowerCase())).size < users.length ? 'Two users have the same name; the name is the username, so each must be unique' :
       !users.some(u => u.role === 'owner' && u.folders.includes('*')) ? 'Keep at least one Owner with access to all folders (*)' : '';
     if (problem) { err.textContent = problem; return; }
     // Keep other settings (salt, editToken, …) and drop the legacy per-user "edit" flag.
@@ -956,9 +1070,9 @@
     b.hidden = !html;
   }
 
-  // Web edits are committed with [skip ci]; they go live when someone presses Publish.
+  // Edits deploy on their own; this catches commits whose deploy failed or was skipped.
   async function checkPending() {
-    if (!isEditing()) return;
+    if (!isEditing() || state.deploying || upQueue.busy) return;
     try {
       const { count } = await PPGitHub.unpublished(state.gh.token, state.manifest.repo);
       if (!count) return banner('');
@@ -982,24 +1096,56 @@
     }
   }
 
-  // Poll manifest.json until the new build is live.
-  function awaitDeploy() {
-    const since = state.manifest.generatedAt;
-    banner(`<span class="spinner"></span><span><b>Publishing…</b> Building and deploying the site (about 1–2 minutes).</span>`, 'busy');
-    let tries = 0;
+  // Poll manifest.json until a build newer than the latest edit is live, then
+  // refresh the list in place. Quick successive edits share one poll loop: the
+  // workflow cancels superseded runs, so only the last build matters. While the
+  // upload queue is running nothing refreshes; the queue calls this when it ends.
+  function awaitDeploy(note = '') {
+    state.lastEdit = Date.now();
+    if (upQueue.busy) { state.deployAfterQueue = true; return; }
+    state.deployAfterQueue = false;
+    const extra = note ? `<br><small>${esc(note)}</small>` : '';
+    banner(`<span class="spinner"></span><span><b>Updating site…</b> Your change is saved; the page refreshes by itself when the new build is live (about 30 seconds).${extra}</span>`, 'busy');
+    if (state.deploying) return;
+    state.deploying = true;
+    const started = Date.now();
     const tick = async () => {
-      tries++;
+      if (upQueue.busy) { state.deploying = false; state.deployAfterQueue = true; return; }
       try {
         const m = await (await fetch('manifest.json?t=' + Date.now(), { cache: 'no-store' })).json();
-        if (m.generatedAt > since) {
-          banner(`${icon('check')}<span>Site updated with your change.</span><button class="pill-btn" data-act="reload">Reload</button>`, 'done');
+        if (m.generatedAt > state.lastEdit) {
+          state.deploying = false;
+          await refreshData();
+          banner(`${icon(note ? 'warn' : 'check')}<span>Site updated.${extra}</span>`, note ? 'warn' : 'done');
+          if (!note) setTimeout(() => { if (!state.deploying && $('#banner').classList.contains('done')) banner(''); }, 4000);
           return;
         }
       } catch { /* keep polling */ }
-      if (tries < 60) setTimeout(tick, 5000);
-      else banner(`${icon('warn')}<span>Still rebuilding — check the Actions tab on GitHub.</span><button class="pill-btn" data-act="reload">Reload</button>`, 'warn');
+      if (Date.now() - started < 5 * 60 * 1000) setTimeout(tick, 3000);
+      else {
+        state.deploying = false;
+        banner(`${icon('warn')}<span>Still rebuilding — check the Actions tab on GitHub.</span><button class="pill-btn" data-act="reload">Reload</button>`, 'warn');
+      }
     };
-    setTimeout(tick, 20000);
+    setTimeout(tick, 12000); // a deploy never lands sooner than this
+  }
+
+  // Re-read the manifest (and, on protected sites, access.json) without reloading the page.
+  async function refreshData() {
+    try {
+      const m = await loadData();
+      if (!m) return location.reload();
+      state.manifest = m;
+      state.folders.clear();
+      state.games.clear();
+      indexTree(m.root);
+      if (state.current) { // don't restart the running playable
+        const g = state.games.get(state.current.path);
+        if (g) state.current = g;
+      } else render();
+    } catch {
+      location.reload();
+    }
   }
 
   async function runAction(btn, errorEl, fn) {
@@ -1008,7 +1154,7 @@
     try {
       const msg = await fn();
       closeModal();
-      if (msg) { toast('Saved: ' + msg); checkPending(); }
+      if (msg) { toast('Saved: ' + msg); awaitDeploy(); }
     } catch (e) {
       if (e.status === 401 && state.gh.fromLogin) {
         errorEl.textContent = 'The shared edit token is invalid or expired — ask the admin to update PREVIEW_EDIT_TOKEN.';
@@ -1108,7 +1254,7 @@
       if (!b) return;
       if (b.dataset.act === 'close') closeModal();
       if (b.dataset.act === 'disconnect') { state.gh = null; store.set('gh', null); closeModal(); renderEditUI(); renderMain(); toast('Edit mode off'); }
-      if (b.dataset.act === 'upload') runAction(b, $('#upError'), doUpload);
+      if (b.dataset.act === 'upload') enqueueUpload();
       if (b.dataset.act === 'delete') runAction(b, $('#delError'), () => doDelete(nodeOf(b.dataset.path, b.dataset.type)));
       if (b.dataset.act === 'users') openUsers();
       if (b.dataset.act === 'user-add') addUserRow();
@@ -1139,6 +1285,7 @@
     });
     $('#banner').addEventListener('click', e => {
       if (e.target.closest('[data-act="reload"]')) location.reload();
+      if (e.target.closest('[data-act="upload-retry"]') && !upQueue.busy) runUploadQueue();
       const p = e.target.closest('[data-act="publish"]');
       if (p) publish(p);
     });
@@ -1176,11 +1323,11 @@
     box.hidden = false;
     $('#loginClose').hidden = !dismissible;
     $('#loginError').textContent = '';
-    setTimeout(() => $('#loginPass').focus(), 0);
+    setTimeout(() => ($('#loginName').value ? $('#loginPass') : $('#loginName')).focus(), 0);
   }
 
-  async function signIn(password) {
-    const key = await PPShared.deriveKey(password, state.access.kdf);
+  async function signIn(name, password) {
+    const key = await PPShared.deriveKey(PPShared.loginSecret(state.access, name, password), state.access.kdf);
     const payload = await PPShared.unlock(state.access, key);
     if (!payload) return false;
     await PPShared.saveKey(key);
@@ -1206,13 +1353,13 @@
     });
     $('#loginForm').addEventListener('submit', async e => {
       e.preventDefault();
-      const input = $('#loginPass'), btn = $('#loginBtn');
-      if (!input.value) return;
+      const name = $('#loginName'), input = $('#loginPass'), btn = $('#loginBtn');
+      if (!name.value.trim() || !input.value) return;
       btn.disabled = true;
       $('#loginError').textContent = '';
       try {
-        if (!(await signIn(input.value))) {
-          $('#loginError').textContent = 'Wrong password';
+        if (!(await signIn(name.value, input.value))) {
+          $('#loginError').textContent = 'Wrong username or password';
           input.select();
         }
       } catch (err) {

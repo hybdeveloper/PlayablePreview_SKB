@@ -32,7 +32,7 @@ function gitDates(dir) {
   try {
     const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     const out = execFileSync(
-      'git', ['-c', 'core.quotepath=off', 'log', '--format=@@%cI', '--name-only', '--', '.'],
+      'git', ['-c', 'core.quotepath=off', 'log', '--no-renames', '--format=@@%cI', '--name-only', '--', '.'], // --no-renames: no blob downloads in CI's blobless clone
       { cwd: dir, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }
     );
     let date = 0;

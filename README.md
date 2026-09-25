@@ -70,7 +70,7 @@ Người sửa **không cần tài khoản GitHub**: mọi thao tác được co
 **Owner làm 1 lần** (GitHub bắt buộc có chìa khoá để ghi vào repo):
 1. https://github.com/settings/personal-access-tokens/new → *Fine-grained token* (Expiration: chọn dài nhất / No expiration)
 2. *Repository access*: Only select repositories → chọn repo này
-3. *Permissions*: **Contents: Read and write**, **Actions: Read and write** (để bấm Publish) và **Secrets: Read and write** (để owner quản lý tài khoản trên web) → Generate → copy token
+3. *Permissions*: **Contents: Read and write**, **Actions: Read and write** (cho nút Publish dự phòng và Save & publish) và **Secrets: Read and write** (để owner quản lý tài khoản trên web) → Generate → copy token
    (hoặc classic token với scope `repo`; fine-grained phải tạo từ tài khoản chủ repo)
 4. Repo → *Settings → Secrets and variables → Actions* → secret mới tên **`PREVIEW_EDIT_TOKEN`** → dán token → chạy lại workflow
 
@@ -79,14 +79,16 @@ Token được **mã hoá bằng mật khẩu** của từng người không ph�
 Khi đã đăng nhập (góc phải hiện nhãn role):
 - **Đổi tên / xoá**: chuột phải vào game/thư mục (hoặc nút ⋮) → *Rename* / *Delete*. Game 1 file sẽ đổi tên/xoá luôn thumbnail cùng tên.
 - **Upload**: vào thư mục → *Upload files* / *Upload folder*, hoặc kéo-thả file/thư mục vào bất kỳ đâu trên trang. Editor không ghi đè được game của người khác.
-- **Quản lý tài khoản** (owner): nút ✏️ → *Manage users* → thêm/xoá người, đổi mật khẩu, role, thư mục → *Save & publish*. Trang ghi thẳng secret `PREVIEW_ACCESS` rồi build lại (~1–2 phút). Phải giữ ít nhất một owner có quyền `*`.
+- **Quản lý tài khoản** (owner): nút ✏️ → *Manage users* → thêm/xoá người, đổi mật khẩu, role, thư mục → *Save & publish*. Trang ghi thẳng secret `PREVIEW_ACCESS` rồi build lại (dưới 1 phút). Phải giữ ít nhất một owner có quyền `*`.
 
-Mỗi thao tác sửa file = 1 commit (kèm `[skip ci]` nên **không tự build**). Trang hiện thanh *"N changes not published yet"* → bấm **Publish** khi muốn đưa lên web (build + deploy ~1–2 phút). Push bằng git thường thì vẫn tự deploy như cũ.
+Upload chạy theo **hàng đợi**: từng file được đẩy lên lần lượt (thả thêm file trong lúc đang upload thì xếp vào cuối hàng), hết hàng mới gộp thành 1 commit rồi mới refresh trang. Đừng đóng tab khi đang upload.
+
+Mỗi thao tác sửa file = 1 commit và **tự build + deploy** (~30–45 giây). Trang hiện *"Updating site…"* rồi tự làm mới danh sách khi bản mới lên, không cần reload. Sửa liên tục nhiều lần thì run cũ bị huỷ, chỉ bản cuối được deploy. Nếu một lần deploy bị lỗi, trang hiện *"N changes not published yet"* kèm nút **Publish** để chạy lại.
 Trang Actions sẽ báo ai được sửa và cảnh báo nếu có owner/admin/editor mà chưa có `PREVIEW_EDIT_TOKEN`.
 
 ## Mật khẩu & phân quyền thư mục
 
-Mỗi mật khẩu được xem một số thư mục nhất định. Khi đã bật, file game private được **mã hoá AES-256** lúc build (tên file cũng bị thay bằng mã băm), nên tải trộm về cũng không đọc được.
+Mỗi tài khoản (tên đăng nhập + mật khẩu) được xem một số thư mục nhất định. Khi đã bật, file game private được **mã hoá AES-256** lúc build (tên file cũng bị thay bằng mã băm), nên tải trộm về cũng không đọc được.
 
 1. Viết cấu hình (xem mẫu [access.example.json](access.example.json)):
    ```json
@@ -101,7 +103,7 @@ Mỗi mật khẩu được xem một số thư mục nhất định. Khi đã b
    ```
    - `folders`: đường dẫn trong `games/`; `"*"` = tất cả. Được quyền thư mục cha là xem được mọi thư mục con.
    - `public` (tuỳ chọn): các thư mục ai cũng xem được, không cần mật khẩu. Nếu bỏ trống, vào trang là phải đăng nhập ngay.
-   - Mỗi người một mật khẩu khác nhau. `name` là tên hiển thị góc phải sau khi đăng nhập.
+   - Đăng nhập bằng **`name` (tên đăng nhập, không phân biệt hoa thường) + `password`**. Mỗi người một `name` khác nhau; mật khẩu trùng nhau cũng được. `name` cũng là tên hiển thị góc phải.
    - `role` (tuỳ chọn): `owner` / `admin` / `editor` / `viewer` (mặc định), xem bảng ở mục trên. Các role sửa cần `PREVIEW_EDIT_TOKEN`.
 2. **GitHub**: *Settings → Secrets and variables → Actions → New repository secret*, tên `PREVIEW_ACCESS`, dán nguyên JSON trên vào → chạy lại workflow.
    **GitLab**: *Settings → CI/CD → Variables*, key `PREVIEW_ACCESS` (tích *Protect*, không cần *Mask*).

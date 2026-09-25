@@ -3,7 +3,7 @@
  *
  * Protected builds publish:
  *   access.json         { v, kdf, public: [folder...], entries: [{ iv, ct }] }
- *                       each entry = AES-GCM(PBKDF2(password)) of { name, manifest, keys }
+ *                       each entry = AES-GCM(PBKDF2(lowercase name + "\n" + password)) of { name, manifest, keys }
  *   g/<id>.bin          iv(12) || AES-GCM(file) for every non-public file,
  *                       id = HMAC(scope mac key, path)[0..16] as hex
  * The password-derived key is kept (non-extractable) in IndexedDB so the
@@ -49,6 +49,11 @@
     if (!res.ok) throw new Error('access.json: HTTP ' + res.status);
     return res.json();
   }
+
+  // v2 builds derive each user's key from username + password (the name is not
+  // case-sensitive); v1 builds used the password alone.
+  const loginName = name => String(name).trim().toLowerCase();
+  const loginSecret = (access, name, password) => (access.v >= 2 ? loginName(name) + '\n' + password : password);
 
   async function deriveKey(password, kdf) {
     const material = await subtle.importKey('raw', te.encode(password), 'PBKDF2', false, ['deriveKey']);
@@ -115,7 +120,7 @@
   }
 
   root.PPShared = {
-    init, isUnder, saveKey, loadKey, clearKey, fetchAccess, deriveKey, unlock, importKeys,
+    init, isUnder, saveKey, loadKey, clearKey, fetchAccess, loginSecret, deriveKey, unlock, importKeys,
     loadSession, findScope, blobUrl, decryptBlob, injectHtml,
   };
 })(self);

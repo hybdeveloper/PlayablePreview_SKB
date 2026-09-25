@@ -211,7 +211,7 @@ body.locked .login { background: var(--bg); backdrop-filter: none; }
 .login-card .brand-logo .i { width: 30px; height: 30px; }
 .login-card h1 { font-size: 22px; font-weight: 500; margin: 16px 0 6px; }
 .login-card p { margin: 0 0 20px; color: var(--muted); }
-.login-card input {
+.login-card input { margin-bottom: 10px;
   width: 100%; height: 48px; border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; font-size: 16px;
   background: var(--surface); color: var(--text); outline: 0;
 }
@@ -280,6 +280,14 @@ body.locked .login { background: var(--bg); backdrop-filter: none; }
 .file-list li:last-child { border-bottom: 0; }
 .file-list span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-list small { color: var(--muted); }
+.up-list li { padding: 6px 8px 6px 12px; }
+.up-list .input-row { flex: 1; min-width: 0; }
+.up-list .input-row input { flex: 1; min-width: 0; height: 34px !important; margin: 0 !important; }
+.up-list .ext { flex: none; font-size: 13px; }
+.up-list small { flex: none; white-space: nowrap; }
+.modal-card input.bad { border-color: #d93025; }
+#upError { white-space: pre-line; }
+#upNote:empty { display: none; }
 .progress { position: relative; height: 26px; border-radius: 13px; background: var(--chip); overflow: hidden; margin: 8px 0; }
 .progress div { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); opacity: .35; transition: width .2s; }
 .progress span { position: relative; display: block; line-height: 26px; padding: 0 12px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -288,6 +296,7 @@ body.locked .login { background: var(--bg); backdrop-filter: none; }
 .banner span { flex: 1; }
 .banner.done .i { fill: var(--ok); }
 .banner.warn .i { fill: var(--warn); }
+.banner .progress { display: block; height: 6px; border-radius: 3px; margin: 6px 0 0; }
 .spinner { flex: none !important; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .drop-hint {

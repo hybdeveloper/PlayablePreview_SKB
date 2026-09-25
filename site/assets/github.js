@@ -89,16 +89,15 @@
     }
   }
 
-  // files: [{ path: repo path, file: File }]
-  async function upload(token, repo, files, message, onProgress, meta) {
-    const entries = [];
-    for (let i = 0; i < files.length; i++) {
-      onProgress && onProgress(i, files.length, files[i].path);
-      const blob = await call(token, 'POST', `${base(repo)}/git/blobs`, { content: await toBase64(files[i].file), encoding: 'base64' });
-      entries.push({ path: files[i].path, mode: '100644', type: 'blob', sha: blob.sha });
-    }
-    onProgress && onProgress(files.length, files.length, 'Committing…');
-    return commitTree(token, repo, message, async () => [...entries], meta);
+  // Stores one file's contents in the repo (not yet part of any commit); returns its blob sha.
+  async function uploadBlob(token, repo, file) {
+    const blob = await call(token, 'POST', `${base(repo)}/git/blobs`, { content: await toBase64(file), encoding: 'base64' });
+    return blob.sha;
+  }
+
+  // files: [{ path: repo path, sha: from uploadBlob }] -> one commit.
+  function commitFiles(token, repo, files, message, meta) {
+    return commitTree(token, repo, message, async () => files.map(f => ({ path: f.path, mode: '100644', type: 'blob', sha: f.sha })), meta);
   }
 
   // moves: [{ from, to }] repo paths; a path moves the file or everything under the folder.
@@ -162,5 +161,5 @@
     await call(token, 'PUT', `${base(repo)}/actions/secrets/${encodeURIComponent(name)}`, { encrypted_value: sodium.to_base64(sealed, b64), key_id });
   }
 
-  root.PPGitHub = { checkAccess, upload, move, remove, unpublished, publish, setSecret };
+  root.PPGitHub = { checkAccess, uploadBlob, commitFiles, move, remove, unpublished, publish, setSecret };
 })(self);

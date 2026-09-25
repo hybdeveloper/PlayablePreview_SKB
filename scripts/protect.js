@@ -29,6 +29,9 @@ const DEFAULT_SALT = 'PlayablePreview/v1';
 
 const ROLES = ['owner', 'admin', 'editor', 'viewer'];
 
+// Must match loginSecret() in site/assets/shared.js.
+const loginName = name => String(name).trim().toLowerCase();
+
 const norm = p => (p === '*' ? '' : String(p).replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''));
 const isUnder = (p, dirs) => dirs.some(d => d === '' || p === d || p.startsWith(d + '/'));
 
@@ -43,14 +46,16 @@ function loadConfig(root) {
   try { cfg = JSON.parse(raw); } catch (e) { throw new Error(`${source} is not valid JSON: ${e.message}`); }
   const users = (cfg.users || []).map((u, i) => {
     if (!u || typeof u.password !== 'string' || !u.password) throw new Error(`${source}: users[${i}] needs a "password"`);
+    if (!String(u.name || '').trim()) throw new Error(`${source}: users[${i}] needs a "name" (it is the username to sign in with)`);
     const folders = (Array.isArray(u.folders) ? u.folders : [u.folders || '*']).map(norm);
     const role = ROLES.includes(u.role) ? u.role : u.edit === true ? 'owner' : 'viewer';
-    return { name: String(u.name || `User ${i + 1}`), password: u.password, folders, role };
+    return { name: String(u.name).trim(), password: u.password, folders, role };
   });
-  const passwords = new Set();
+  // Users sign in with name + password, so names (not passwords) must be unique.
+  const names = new Set();
   for (const u of users) {
-    if (passwords.has(u.password)) throw new Error(`${source}: two users share the same password`);
-    passwords.add(u.password);
+    if (names.has(loginName(u.name))) throw new Error(`${source}: two users are named "${u.name}"`);
+    names.add(loginName(u.name));
   }
   // Token that non-viewers get (encrypted with their password) to change files from the page.
   const editToken = (process.env.PREVIEW_EDIT_TOKEN || cfg.editToken || "").trim() || null;
@@ -138,7 +143,7 @@ function writeProtected({ cfg, manifest, gamesDir, outDir }) {
     if (u.role !== 'viewer' && cfg.editToken) payload.edit = { token: cfg.editToken };
     // Owners edit the user list from the page, which rewrites the whole PREVIEW_ACCESS secret.
     if (u.role === 'owner') payload.config = cfg.raw;
-    const key = crypto.pbkdf2Sync(u.password, salt, ITERATIONS, 32, 'sha256');
+    const key = crypto.pbkdf2Sync(loginName(u.name) + '\n' + u.password, salt, ITERATIONS, 32, 'sha256');
     const { iv, ct } = encrypt(key, Buffer.from(JSON.stringify(payload)));
     console.log(`  - ${u.name}: ${u.folders.map(f => f || "*").join(", ")} (${payload.manifest.count} playables), ${u.role}${u.role !== 'viewer' && !payload.edit ? ' (no edit token)' : ''}`);
     return { iv: iv.toString('base64'), ct: ct.toString('base64') };
@@ -146,7 +151,7 @@ function writeProtected({ cfg, manifest, gamesDir, outDir }) {
   entries.sort(() => Math.random() - 0.5); // order must not reveal which entry is whose
 
   const access = {
-    v: 1,
+    v: 2, // v2: keys come from username + password
     kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: ITERATIONS, salt: salt.toString('base64') },
     public: cfg.public,
     entries,

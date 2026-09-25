@@ -10,18 +10,23 @@ permissions:
   pages: write
   id-token: write
 
+# A newer commit (e.g. several quick edits from the site) cancels the older run.
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  # One job instead of build + deploy: skips a second runner start-up (~10-20 s).
+  deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0   # full history -> real "Modified" dates
-          lfs: true
+          fetch-depth: 0      # full history -> real "Modified" dates
+          filter: blob:none   # ...but only the current files' contents, not every old version
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -29,17 +34,8 @@ jobs:
         env:
           PREVIEW_ACCESS: ${{ secrets.PREVIEW_ACCESS }}   # passwords/folders JSON; empty = no password
           PREVIEW_EDIT_TOKEN: ${{ secrets.PREVIEW_EDIT_TOKEN }}   # GitHub token for users with "edit": true
-      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
