@@ -23,15 +23,29 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # Games are loaded by the page straight from GitHub, so the build only needs
+      # their names and sizes: skip checking out games/ (history is kept for the
+      # "Modified" dates, without file contents).
+      # To bundle games into the site instead (PREVIEW_GAMES: bundle), remove the
+      # sparse-checkout lines and PREVIEW_TREE below.
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0      # full history -> real "Modified" dates
-          filter: blob:none   # ...but only the current files' contents, not every old version
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/games/
+      - name: List games from the commit tree
+        run: >
+          curl -sSf -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json"
+          "https://api.github.com/repos/$GITHUB_REPOSITORY/git/trees/$GITHUB_SHA?recursive=1" -o "$RUNNER_TEMP/tree.json"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      # Node from the runner image (no setup-node download).
       - run: node scripts/build.js --out dist
         env:
+          PREVIEW_TREE: ${{ runner.temp }}/tree.json
           PREVIEW_ACCESS: ${{ secrets.PREVIEW_ACCESS }}   # passwords/folders JSON; empty = no password
           PREVIEW_EDIT_TOKEN: ${{ secrets.PREVIEW_EDIT_TOKEN }}   # GitHub token for users with "edit": true
       - uses: actions/upload-pages-artifact@v4

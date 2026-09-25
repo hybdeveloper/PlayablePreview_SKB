@@ -68,45 +68,85 @@ function repoInfo(dir) {
   }
 }
 
+// Reads games/ either from disk or, with PREVIEW_TREE=<file> (CI), from a GitHub
+// "git tree" JSON (GET /repos/:repo/git/trees/:sha?recursive=1, which includes
+// sizes), so the large game files never have to be checked out. Only playable.json
+// files are read, via `git show` (fetched on demand in a blobless clone).
+function fsSource(root) {
+  const at = rel => path.join(root, rel);
+  return {
+    list: rel => fs.readdirSync(at(rel), { withFileTypes: true }).map(e => ({ name: e.name, dir: e.isDirectory() })),
+    exists: rel => fs.existsSync(at(rel)),
+    size: rel => fs.statSync(at(rel)).size,
+    mtime: rel => Math.round(fs.statSync(at(rel)).mtimeMs),
+    read: rel => { try { return fs.readFileSync(at(rel), 'utf8'); } catch { return null; } },
+  };
+}
+
+function treeSource(root, file) {
+  const run = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 });
+  const prefix = run(['rev-parse', '--show-prefix']).trim().replace(/\/$/, ''); // games dir inside the repo
+  const tree = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (!Array.isArray(tree.tree)) throw new Error(`${file}: not a git tree (${tree.message || 'no "tree" field'})`);
+  if (tree.truncated) throw new Error(`${file}: tree is truncated; build without PREVIEW_TREE`);
+  const dirs = new Map([['', new Map()]]), sizes = new Map();
+  for (const e of tree.tree) {
+    if (e.type !== 'blob' || (prefix && !e.path.startsWith(prefix + '/'))) continue;
+    const rel = prefix ? e.path.slice(prefix.length + 1) : e.path;
+    sizes.set(rel, e.size || 0);
+    let dir = '';
+    rel.split('/').forEach((name, i, parts) => {
+      if (!dirs.has(dir)) dirs.set(dir, new Map());
+      dirs.get(dir).set(name, i < parts.length - 1);
+      dir = dir ? `${dir}/${name}` : name;
+    });
+  }
+  return {
+    list: rel => [...(dirs.get(rel) || [])].map(([name, dir]) => ({ name, dir })),
+    exists: rel => sizes.has(rel) || dirs.has(rel),
+    size: rel => sizes.get(rel) || 0,
+    mtime: () => Date.now(),
+    read: rel => { try { return sizes.has(rel) ? run(['show', `HEAD:${prefix ? prefix + '/' : ''}${rel}`]) : null; } catch { return null; } },
+  };
+}
+
 function buildManifest(gamesDir) {
   const root = path.resolve(gamesDir);
+  if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+  const src = process.env.PREVIEW_TREE ? treeSource(root, path.resolve(process.env.PREVIEW_TREE)) : fsSource(root);
   const dates = gitDates(root);
   let owners = {};
   try { owners = JSON.parse(fs.readFileSync(path.join(root, '..', OWNERS_FILE), 'utf8')) || {}; } catch { /* none yet */ }
   const ownerOf = rel => (typeof owners[rel] === 'string' ? { owner: owners[rel] } : {});
+  const join = (a, b) => (a ? `${a}/${b}` : b);
   let count = 0;
 
-  const fileInfo = abs => {
-    const st = fs.statSync(abs);
-    return { size: st.size, modified: dates.get(abs) || Math.round(st.mtimeMs) };
-  };
+  const fileInfo = rel => ({ size: src.size(rel), modified: dates.get(path.join(root, rel)) || src.mtime(rel) });
 
-  function walkFiles(abs) {
+  function walkFiles(rel) {
     let size = 0, modified = 0;
-    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
-      const p = path.join(abs, e.name);
-      const info = e.isDirectory() ? walkFiles(p) : fileInfo(p);
+    for (const e of src.list(rel)) {
+      const info = e.dir ? walkFiles(join(rel, e.name)) : fileInfo(join(rel, e.name));
       size += info.size;
       modified = Math.max(modified, info.modified);
     }
     return { size, modified };
   }
 
-  function readMeta(abs) {
-    try { return JSON.parse(fs.readFileSync(path.join(abs, 'playable.json'), 'utf8')); } catch { return {}; }
+  function readMeta(rel) {
+    try { return JSON.parse(src.read(join(rel, 'playable.json'))) || {}; } catch { return {}; }
   }
 
-  function gameFolder(abs, rel, name) {
-    const files = fs.readdirSync(abs, { withFileTypes: true }).filter(e => e.isFile());
-    const thumb = files.find(e => {
+  function gameFolder(rel, name) {
+    const thumb = src.list(rel).filter(e => !e.dir).find(e => {
       const ext = path.extname(e.name).toLowerCase();
       return IMG_EXT.includes(ext) && THUMB_NAMES.includes(path.basename(e.name, ext).toLowerCase());
     });
-    const meta = readMeta(abs);
+    const meta = readMeta(rel);
     count++;
     return {
       type: 'game', kind: 'folder', name, title: meta.title || name, path: rel, entry: `${rel}/index.html`,
-      ...walkFiles(abs),
+      ...walkFiles(rel),
       ...(thumb && { thumb: `${rel}/${thumb.name}` }),
       ...(meta.orientation && { orientation: meta.orientation }),
       ...(meta.description && { description: meta.description }),
@@ -114,39 +154,37 @@ function buildManifest(gamesDir) {
     };
   }
 
-  function gameFile(abs, rel, name, siblings) {
+  function gameFile(rel, name, siblings) {
     const base = path.basename(name, path.extname(name));
     const thumb = siblings.find(s => IMG_EXT.includes(path.extname(s).toLowerCase()) && path.basename(s, path.extname(s)) === base);
     count++;
     const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/') + 1) : '';
     return {
       type: 'game', kind: 'file', name, title: base, path: rel, entry: rel,
-      ...fileInfo(abs),
+      ...fileInfo(rel),
       ...(thumb && { thumb: dir + thumb }),
       ...ownerOf(rel),
     };
   }
 
-  function folder(abs, rel, name) {
-    const entries = fs.readdirSync(abs, { withFileTypes: true }).filter(e => !isHidden(e.name));
-    const siblings = entries.filter(e => e.isFile()).map(e => e.name);
+  function folder(rel, name) {
+    const entries = src.list(rel).filter(e => !isHidden(e.name));
+    const siblings = entries.filter(e => !e.dir).map(e => e.name);
     const children = [];
     for (const e of entries) {
-      const eAbs = path.join(abs, e.name);
-      const eRel = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) {
-        children.push(fs.existsSync(path.join(eAbs, 'index.html')) ? gameFolder(eAbs, eRel, e.name) : folder(eAbs, eRel, e.name));
+      const eRel = join(rel, e.name);
+      if (e.dir) {
+        children.push(src.exists(join(eRel, 'index.html')) ? gameFolder(eRel, e.name) : folder(eRel, e.name));
       } else if (HTML_EXT.includes(path.extname(e.name).toLowerCase())) {
-        children.push(gameFile(eAbs, eRel, e.name, siblings));
+        children.push(gameFile(eRel, e.name, siblings));
       }
     }
     const size = children.reduce((s, c) => s + c.size, 0);
-    const modified = children.reduce((m, c) => Math.max(m, c.modified), 0) || Math.round(fs.statSync(abs).mtimeMs);
-    return { type: 'folder', name, title: name, path: toPosix(rel), size, modified, children };
+    const modified = children.reduce((m, c) => Math.max(m, c.modified), 0) || src.mtime(rel);
+    return { type: 'folder', name, title: name, path: rel, size, modified, children };
   }
 
-  if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
-  const tree = folder(root, '', 'Playables');
+  const tree = folder('', 'Playables');
   return { generatedAt: Date.now(), count, root: tree, repo: repoInfo(root) };
 }
 

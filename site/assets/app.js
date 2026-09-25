@@ -773,7 +773,8 @@
       </form>`);
   }
 
-  async function doRename(node, newBase) {
+  // Checks a new name; returns what to move (null when unchanged) or throws a message for the dialog.
+  function planRename(node, newBase) {
     newBase = newBase.trim();
     if (!newBase || BAD_CHARS.test(newBase) || newBase === '.' || newBase === '..') throw new Error('Name cannot be empty or contain \\ / : * ? " < > | # %');
     const isFile = node.type === 'game' && node.kind === 'file';
@@ -784,10 +785,28 @@
     const sibling = p => (dir ? dir + '/' : '') + p;
     const parent = state.folders.get(dir);
     if (parent && parent.children.some(c => c !== node && c.name.toLowerCase() === newName.toLowerCase())) throw new Error(`"${newName}" already exists here`);
-
     const moves = [{ from: node.path, to: sibling(newName) }];
     const thumb = pairedThumb(node);
     if (thumb) moves.push({ from: thumb, to: sibling(newBase + splitExt(thumb)[1]) });
+    return { newBase, newName, moves };
+  }
+
+  // Rename closes the dialog at once and shows the new name right away (links keep
+  // the old path, which stays valid until the new build is live); commits in the background.
+  function startRename(node, value) {
+    if (!node || !canChange(node)) return;
+    let plan;
+    try { plan = planRename(node, value); } catch (e) { $('#renameError').textContent = e.message; return; }
+    closeModal();
+    if (!plan) return;
+    const oldName = node.name;
+    if (node.title === oldName || node.title === splitExt(oldName)[0]) node.title = node.type === 'game' && node.kind === 'file' ? plan.newBase : plan.newName;
+    node.name = plan.newName;
+    if (!state.current) render();
+    inBackground(`Renaming ${oldName}…`, `Could not rename ${node.path}`, () => doRename(node, plan));
+  }
+
+  async function doRename(node, { moves, newName }) {
     const meta = ownersMeta(o => {
       for (const m of moves) for (const k of Object.keys(o)) if (under(k, m.from)) { o[m.to + k.slice(m.from.length)] = o[k]; delete o[k]; }
     });
@@ -814,7 +833,6 @@
   // Delete closes the dialog at once and hides the item right away; the commit
   // runs in the background. Deletes are chained so quick successive ones don't
   // race each other for the branch head.
-  let deleteChain = Promise.resolve();
   function startDelete(node) {
     closeModal();
     if (!node) return;
@@ -822,17 +840,29 @@
     if (parent) parent.children = parent.children.filter(c => c !== node);
     for (const map of [state.games, state.folders]) for (const k of [...map.keys()]) if (under(k, node.path)) map.delete(k);
     if (!state.current) render();
-    toast(`Deleting ${node.name}…`);
+    inBackground(`Deleting ${node.name}…`, `Could not delete ${node.path}`, () => doDelete(node));
+  }
+
+  // Runs a rename/delete commit after its dialog has closed. Changes are chained so
+  // quick successive ones don't race each other for the branch head; on failure the
+  // list is re-read, which undoes what was shown optimistically.
+  let changeChain = Promise.resolve();
+  function inBackground(label, failLabel, task) {
+    toast(label);
     state.pendingChanges = (state.pendingChanges || 0) + 1;
-    deleteChain = deleteChain.then(async () => {
+    changeChain = changeChain.then(async () => {
       try {
-        const msg = await doDelete(node);
+        const msg = await task();
         toast('Saved: ' + msg);
         awaitDeploy();
       } catch (e) {
-        const hint = e.status === 401 && state.gh.fromLogin ? ' — the shared edit token is invalid or expired; ask the admin to update PREVIEW_EDIT_TOKEN.' : '';
-        banner(`${icon('warn')}<span>Could not delete ${esc(node.path)}: ${esc(e.message + hint)}</span>`, 'warn');
-        refreshData(); // bring the item back
+        const fromLogin = state.gh && state.gh.fromLogin;
+        const hint = e.status === 401 && fromLogin ? ' — the shared edit token is invalid or expired; ask the admin to update PREVIEW_EDIT_TOKEN.'
+          : e.status === 403 && /personal access token/i.test(e.message) ? ' — the edit token cannot write to this repo; create it from the repo owner’s account (fine-grained, Contents: Read and write) or use a classic token with the public_repo / repo scope.'
+          : '';
+        if (e.status === 401 && !fromLogin) { state.gh = null; store.set('gh', null); renderEditUI(); }
+        banner(`${icon('warn')}<span>${esc(failLabel)}: ${esc(e.message + hint)}</span>`, 'warn');
+        refreshData();
       } finally {
         state.pendingChanges--;
       }
@@ -1182,29 +1212,6 @@
     }
   }
 
-  async function runAction(btn, errorEl, fn) {
-    btn.disabled = true;
-    errorEl.textContent = '';
-    try {
-      const msg = await fn();
-      closeModal();
-      if (msg) { toast('Saved: ' + msg); awaitDeploy(); }
-    } catch (e) {
-      if (e.status === 401 && state.gh.fromLogin) {
-        errorEl.textContent = 'The shared edit token is invalid or expired — ask the admin to update PREVIEW_EDIT_TOKEN.';
-        btn.disabled = false;
-        return;
-      }
-      if (e.status === 401) { state.gh = null; store.set('gh', null); renderEditUI(); }
-      if (e.status === 403 && /personal access token/i.test(e.message)) {
-        errorEl.textContent = 'The edit token cannot write to this repo. Create it from the repo owner’s account (fine-grained, Contents: Read and write) or use a classic token with the public_repo / repo scope.';
-        btn.disabled = false;
-        return;
-      }
-      errorEl.textContent = e.message;
-      btn.disabled = false;
-    }
-  }
 
   function bindEditor() {
     $('#editBtn').addEventListener('click', openConnect);
@@ -1314,7 +1321,7 @@
       if (e.target.id === 'renameForm') {
         const f = e.target;
         const node = f.dataset.type === 'folder' ? state.folders.get(f.dataset.path) : state.games.get(f.dataset.path);
-        runAction($('#renameBtn'), $('#renameError'), () => doRename(node, $('#renameInput').value));
+        startRename(node, $('#renameInput').value);
       }
     });
     $('#banner').addEventListener('click', e => {

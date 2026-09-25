@@ -26,6 +26,9 @@ const manifest = buildManifest(GAMES);
 // PREVIEW_GAMES=bundle (or a non-GitHub remote) copies/encrypts games/ into the site instead.
 const r = manifest.repo;
 const remote = process.env.PREVIEW_GAMES !== 'bundle' && r && r.commit;
+if (!remote && process.env.PREVIEW_TREE) {
+  throw new Error('Bundling games needs them checked out: unset PREVIEW_TREE and remove sparse-checkout in the workflow');
+}
 if (remote) {
   const enc = p => p.split('/').map(encodeURIComponent).join('/');
   manifest.source = { base: `https://raw.githubusercontent.com/${enc(r.owner)}/${enc(r.name)}/${r.commit}/${r.games ? enc(r.games) + '/' : ''}` };

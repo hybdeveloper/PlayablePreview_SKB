@@ -140,7 +140,7 @@ Muốn thử bản có mật khẩu trên máy: tạo file `access.config.json` 
 
 ## Tải game khi mở
 
-Mặc định (repo GitHub) build **không copy game vào site** nữa, chỉ tạo danh sách, nên deploy nhanh và không phụ thuộc dung lượng thư mục `games/`. Khi mở một playable, service worker của trang tải từng file của game đó từ `raw.githubusercontent.com`, cố định theo commit của lần build. File tải về không được lưu lại (`no-store`); đóng player là game bị gỡ khỏi trang.
+Mặc định (repo GitHub) build **không copy game vào site** nữa, chỉ tạo danh sách, nên deploy nhanh và không phụ thuộc dung lượng thư mục `games/`. Workflow cũng không checkout `games/`: tên và dung lượng file lấy từ git tree qua GitHub API (`PREVIEW_TREE`). Khi mở một playable, service worker của trang tải từng file của game đó từ `raw.githubusercontent.com`, cố định theo commit của lần build. File tải về không được lưu lại (`no-store`); đóng player là game bị gỡ khỏi trang.
 
 - Link QR / link chia sẻ trỏ vào trang preview (game chỉ chạy được qua service worker của trang).
-- Muốn quay về kiểu cũ (copy/mã hoá game vào site), đặt `PREVIEW_GAMES: bundle` trong `env` của bước build trong workflow. Repo private hoặc GitLab thì bắt buộc dùng kiểu này.
+- Muốn quay về kiểu cũ (copy/mã hoá game vào site), đặt `PREVIEW_GAMES: bundle` trong `env` của bước build, đồng thời bỏ `sparse-checkout` và `PREVIEW_TREE` trong workflow. Repo private hoặc GitLab thì bắt buộc dùng kiểu này.
