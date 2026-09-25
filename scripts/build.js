@@ -38,6 +38,13 @@ fs.rmSync(OUT, { recursive: true, force: true });
 fs.cpSync(SITE, OUT, { recursive: true });
 fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
 
+// GitHub Pages lets browsers cache files for 10 minutes: version the page's
+// scripts/styles per build so a deploy takes effect on the next page load.
+const version = ((r && r.commit) || String(manifest.generatedAt)).slice(0, 12);
+const indexFile = path.join(OUT, 'index.html');
+fs.writeFileSync(indexFile, fs.readFileSync(indexFile, 'utf8')
+  .replace(/(\s(?:src|href)=")(assets\/[^"?#]+\.(?:js|css))"/g, `$1$2?v=${version}"`));
+
 if (cfg) {
   console.log(`Access control ON (${cfg.source}): ${cfg.users.length} password(s), public: ${cfg.public.join(', ') || 'none'}`);
   const { pub, enc } = writeProtected({ cfg, manifest, gamesDir: GAMES, outDir: OUT, remote });
