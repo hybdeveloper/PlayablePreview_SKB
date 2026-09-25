@@ -653,6 +653,9 @@
   // Without passwords, editing means pasting a token that can do anything anyway: owner.
   const role = () => (!isEditing() ? 'viewer' : state.protected ? state.role || 'viewer' : 'owner');
   const canUpload = () => role() !== 'viewer';
+  // Upload/deploy progress (banners, "Saved: …" toasts) is shown to owners and admins only;
+  // editors get a short "Uploaded" toast, plus errors.
+  const showStatus = () => role() === 'owner' || role() === 'admin';
   function canChange(node) { // rename or delete
     if (!node || !node.path) return false;
     const r = role();
@@ -931,13 +934,14 @@
     for (const i of items) upQueue.todo.push({ folder, path: [folder, i.rel].filter(Boolean).join('/'), file: i.file });
     upQueue.total += items.length;
     closeModal();
-    if (upQueue.busy) toast(`Added ${items.length} file${items.length > 1 ? 's' : ''} to the upload queue`);
+    if (upQueue.busy) { if (showStatus()) toast(`Added ${items.length} file${items.length > 1 ? 's' : ''} to the upload queue`); }
     else runUploadQueue();
   }
   // Nothing is committed until the queue ends, so leaving early loses the upload.
   window.addEventListener('beforeunload', e => { if (upQueue.busy) e.preventDefault(); });
 
   function uploadBanner(text) {
+    if (!showStatus()) return;
     const n = upQueue.done.length + upQueue.failed.length;
     banner(`<span class="spinner"></span><span><b>Uploading ${Math.min(n + 1, upQueue.total)}/${upQueue.total}</b> · ${esc(text)}
       <span class="progress"><div style="width:${Math.round((n / upQueue.total) * 100)}%"></div></span></span>`, 'busy');
@@ -967,13 +971,13 @@
     const failed = upQueue.failed;
     let error = '';
     if (done.length) {
-      banner(`<span class="spinner"></span><span><b>Saving ${done.length} file${done.length > 1 ? 's' : ''}…</b></span>`, 'busy');
+      if (showStatus()) banner(`<span class="spinner"></span><span><b>Saving ${done.length} file${done.length > 1 ? 's' : ''}…</b></span>`, 'busy');
       const folders = [...new Set(done.map(i => i.folder))];
       const msg = `Upload ${done.length} file${done.length > 1 ? 's' : ''} to ${folders.length === 1 ? folders[0] || '/' : folders.length + ' folders'}`;
       const meta = state.user ? ownersMeta(o => { for (const i of done) o[i.path] = state.user; }) : undefined;
       try {
         await PPGitHub.commitFiles(token, repo, done.map(i => ({ path: repoPath(i.path), sha: i.sha })), msg + byline(), meta);
-        toast('Saved: ' + msg);
+        toast(showStatus() ? 'Saved: ' + msg : `Uploaded ${done.length} file${done.length > 1 ? 's' : ''}`);
         upQueue.done = [];
       } catch (e) {
         error = e.message; // keep the uploaded blobs so Retry only has to commit
@@ -1100,7 +1104,7 @@
 
   // Edits deploy on their own; this catches commits whose deploy failed or was skipped.
   async function checkPending() {
-    if (!isEditing() || state.deploying || upQueue.busy) return;
+    if (!isEditing() || !showStatus() || state.deploying || upQueue.busy) return;
     try {
       const { count } = await PPGitHub.unpublished(state.gh.token, state.manifest.repo);
       if (!count) return banner('');
@@ -1133,7 +1137,8 @@
     if (upQueue.busy) { state.deployAfterQueue = true; return; }
     state.deployAfterQueue = false;
     const extra = note ? `<br><small>${esc(note)}</small>` : '';
-    banner(`<span class="spinner"></span><span><b>Updating site…</b> Your change is saved; the page refreshes by itself when the new build is live (about 30 seconds).${extra}</span>`, 'busy');
+    if (showStatus()) banner(`<span class="spinner"></span><span><b>Updating site…</b> Your change is saved; the page refreshes by itself when the new build is live (about 30 seconds).${extra}</span>`, 'busy');
+    else if (note) banner(`${icon('warn')}<span>${esc(note)}</span>`, 'warn');
     if (state.deploying) return;
     state.deploying = true;
     const started = Date.now();
@@ -1145,7 +1150,7 @@
         if (m.generatedAt > state.lastEdit) {
           state.deploying = false;
           await refreshData();
-          banner(`${icon(note ? 'warn' : 'check')}<span>Site updated.${extra}</span>`, note ? 'warn' : 'done');
+          if (showStatus()) banner(`${icon(note ? 'warn' : 'check')}<span>Site updated.${extra}</span>`, note ? 'warn' : 'done');
           if (!note) setTimeout(() => { if (!state.deploying && $('#banner').classList.contains('done')) banner(''); }, 4000);
           return;
         }
@@ -1153,7 +1158,7 @@
       if (Date.now() - started < 5 * 60 * 1000) setTimeout(tick, 3000);
       else {
         state.deploying = false;
-        banner(`${icon('warn')}<span>Still rebuilding — check the Actions tab on GitHub.</span><button class="pill-btn" data-act="reload">Reload</button>`, 'warn');
+        if (showStatus()) banner(`${icon('warn')}<span>Still rebuilding — check the Actions tab on GitHub.</span><button class="pill-btn" data-act="reload">Reload</button>`, 'warn');
       }
     };
     setTimeout(tick, 12000); // a deploy never lands sooner than this
