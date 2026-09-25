@@ -53,3 +53,5 @@ jobs:
           path: dist
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          reporting_interval: 1000   # check every 1 s instead of 5 s; Pages is usually live within ~2 s
