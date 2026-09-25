@@ -5,7 +5,7 @@
 // {
 //   "public": ["Demo/Puzzle"],                                   // optional, no password needed
 //   "users": [
-//     { "name": "Admin",    "password": "...", "folders": ["*"] },
+//     { "name": "Boss",     "password": "...", "folders": ["*"], "role": "owner" },
 //     { "name": "Client A", "password": "...", "folders": ["ClientA", "Demo/Runner"] }
 //   ]
 // }
@@ -14,12 +14,20 @@
 // the key of the deepest scope containing them (files outside every scope use
 // the root scope, readable only by "*" users). A user receives the keys of all
 // scopes inside the folders they were granted.
+//
+// Roles (enforced by the page UI; every non-viewer holds the same edit token):
+//   owner  - everything, including renaming/deleting folders and managing users
+//   admin  - upload, rename and delete any playable; no folder changes, no users
+//   editor - upload; rename and delete only the playables they uploaded
+//   viewer - read only (default; legacy "edit": true means owner)
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
 const ITERATIONS = 150000;
 const DEFAULT_SALT = 'PlayablePreview/v1';
+
+const ROLES = ['owner', 'admin', 'editor', 'viewer'];
 
 const norm = p => (p === '*' ? '' : String(p).replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''));
 const isUnder = (p, dirs) => dirs.some(d => d === '' || p === d || p.startsWith(d + '/'));
@@ -36,16 +44,17 @@ function loadConfig(root) {
   const users = (cfg.users || []).map((u, i) => {
     if (!u || typeof u.password !== 'string' || !u.password) throw new Error(`${source}: users[${i}] needs a "password"`);
     const folders = (Array.isArray(u.folders) ? u.folders : [u.folders || '*']).map(norm);
-    return { name: String(u.name || `User ${i + 1}`), password: u.password, folders, edit: u.edit === true };
+    const role = ROLES.includes(u.role) ? u.role : u.edit === true ? 'owner' : 'viewer';
+    return { name: String(u.name || `User ${i + 1}`), password: u.password, folders, role };
   });
   const passwords = new Set();
   for (const u of users) {
     if (passwords.has(u.password)) throw new Error(`${source}: two users share the same password`);
     passwords.add(u.password);
   }
-  // Token that edit-enabled users get (encrypted with their password) to rename/upload from the page.
+  // Token that non-viewers get (encrypted with their password) to change files from the page.
   const editToken = (process.env.PREVIEW_EDIT_TOKEN || cfg.editToken || "").trim() || null;
-  return { source, users, public: (cfg.public || []).map(norm), salt: cfg.salt || DEFAULT_SALT, editToken };
+  return { source, raw: cfg, users, public: (cfg.public || []).map(norm), salt: cfg.salt || DEFAULT_SALT, editToken };
 }
 
 function encrypt(key, data) {
@@ -125,11 +134,13 @@ function writeProtected({ cfg, manifest, gamesDir, outDir }) {
     const root = prune(manifest.root, p => publicVisible(p) || isUnder(p, u.folders)) || { ...manifest.root, children: [] };
     const userKeys = Object.fromEntries(scopes.filter(s => isUnder(s, u.folders))
       .map(s => [s, { e: keys[s].e.toString('base64'), m: keys[s].m.toString('base64') }]));
-    const payload = { name: u.name, manifest: { generatedAt: manifest.generatedAt, count: countGames(root), root, repo: manifest.repo }, keys: userKeys };
-    if (u.edit && cfg.editToken) payload.edit = { token: cfg.editToken };
+    const payload = { name: u.name, role: u.role, manifest: { generatedAt: manifest.generatedAt, count: countGames(root), root, repo: manifest.repo }, keys: userKeys };
+    if (u.role !== 'viewer' && cfg.editToken) payload.edit = { token: cfg.editToken };
+    // Owners edit the user list from the page, which rewrites the whole PREVIEW_ACCESS secret.
+    if (u.role === 'owner') payload.config = cfg.raw;
     const key = crypto.pbkdf2Sync(u.password, salt, ITERATIONS, 32, 'sha256');
     const { iv, ct } = encrypt(key, Buffer.from(JSON.stringify(payload)));
-    console.log(`  - ${u.name}: ${u.folders.map(f => f || "*").join(", ")} (${payload.manifest.count} playables)${payload.edit ? ", can edit" : ""}`);
+    console.log(`  - ${u.name}: ${u.folders.map(f => f || "*").join(", ")} (${payload.manifest.count} playables), ${u.role}${u.role !== 'viewer' && !payload.edit ? ' (no edit token)' : ''}`);
     return { iv: iv.toString('base64'), ct: ct.toString('base64') };
   });
   entries.sort(() => Math.random() - 0.5); // order must not reveal which entry is whose
@@ -144,4 +155,4 @@ function writeProtected({ cfg, manifest, gamesDir, outDir }) {
   return { pub, enc };
 }
 
-module.exports = { loadConfig, writeProtected };
+module.exports = { loadConfig, writeProtected, ROLES };

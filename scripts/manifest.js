@@ -8,6 +8,8 @@
 //   - Thumbnail: <game folder>/thumbnail|thumb|icon|cover|preview.(png|jpg|webp|gif|svg)
 //                or, for a single file "Foo.html", a sibling "Foo.png" (etc).
 //   - Optional <game folder>/playable.json: { "title", "orientation": "portrait|landscape", "description" }
+//   - Uploader: .pp-owners.json next to games/ maps game file paths to the user
+//     who uploaded them from the site (written by edit mode, used for permissions).
 //
 // Modified dates come from git history when available (CI checkouts reset mtimes),
 // falling back to the file system.
@@ -19,6 +21,8 @@ const { execFileSync } = require('child_process');
 const HTML_EXT = ['.html', '.htm'];
 const IMG_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'];
 const THUMB_NAMES = ['thumbnail', 'thumb', 'icon', 'cover', 'preview'];
+
+const OWNERS_FILE = '.pp-owners.json';
 
 const isHidden = name => name.startsWith('.') || name.startsWith('_') || name === 'node_modules';
 const toPosix = p => p.split(path.sep).join('/');
@@ -67,6 +71,9 @@ function repoInfo(dir) {
 function buildManifest(gamesDir) {
   const root = path.resolve(gamesDir);
   const dates = gitDates(root);
+  let owners = {};
+  try { owners = JSON.parse(fs.readFileSync(path.join(root, '..', OWNERS_FILE), 'utf8')) || {}; } catch { /* none yet */ }
+  const ownerOf = rel => (typeof owners[rel] === 'string' ? { owner: owners[rel] } : {});
   let count = 0;
 
   const fileInfo = abs => {
@@ -103,6 +110,7 @@ function buildManifest(gamesDir) {
       ...(thumb && { thumb: `${rel}/${thumb.name}` }),
       ...(meta.orientation && { orientation: meta.orientation }),
       ...(meta.description && { description: meta.description }),
+      ...ownerOf(`${rel}/index.html`),
     };
   }
 
@@ -115,6 +123,7 @@ function buildManifest(gamesDir) {
       type: 'game', kind: 'file', name, title: base, path: rel, entry: rel,
       ...fileInfo(abs),
       ...(thumb && { thumb: dir + thumb }),
+      ...ownerOf(rel),
     };
   }
 
@@ -141,4 +150,4 @@ function buildManifest(gamesDir) {
   return { generatedAt: Date.now(), count, root: tree, repo: repoInfo(root) };
 }
 
-module.exports = { buildManifest, isHidden };
+module.exports = { buildManifest, isHidden, OWNERS_FILE };

@@ -1,7 +1,8 @@
 {
   "public": ["Demo/Puzzle"],
   "users": [
-    { "name": "Admin", "password": "change-me-admin", "folders": ["*"], "edit": true },
+    { "name": "Admin", "password": "change-me-admin", "folders": ["*"], "role": "owner" },
+    { "name": "Designer", "password": "change-me-designer", "folders": ["*"], "role": "editor" },
     { "name": "Client A", "password": "change-me-client-a", "folders": ["Demo/Runner"] }
   ]
 }

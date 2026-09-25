@@ -26,6 +26,12 @@ function Get-Ms($dt) { ([DateTimeOffset]$dt.ToUniversalTime()).ToUnixTimeMillise
 function Test-Hidden($name) { $name.StartsWith('.') -or $name.StartsWith('_') -or $name -eq 'node_modules' }
 
 $script:count = 0
+$script:owners = $null
+
+# Uploader of a game file, from .pp-owners.json next to games/ (see scripts/manifest.js).
+function Add-Owner($node, $key) {
+  if ($script:owners -and $script:owners.PSObject.Properties[$key]) { $node.owner = [string]$script:owners.PSObject.Properties[$key].Value }
+}
 
 function Read-GameFolder($dir, $rel) {
   $files = @(Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Force)
@@ -34,6 +40,7 @@ function Read-GameFolder($dir, $rel) {
   $node = [ordered]@{ type = 'game'; kind = 'folder'; name = $dir.Name; title = $dir.Name; path = $rel; entry = "$rel/index.html"; size = $size; modified = $mod }
   $thumb = Get-ChildItem -LiteralPath $dir.FullName -File | Where-Object { ($ImgExt -contains $_.Extension.ToLower()) -and ($ThumbNames -contains $_.BaseName.ToLower()) } | Select-Object -First 1
   if ($thumb) { $node.thumb = "$rel/$($thumb.Name)" }
+  Add-Owner $node "$rel/index.html"
   $metaPath = Join-Path $dir.FullName 'playable.json'
   if (Test-Path -LiteralPath $metaPath) {
     try {
@@ -54,6 +61,7 @@ function Read-GameFile($file, $rel, $siblings) {
     $dir = if ($rel.Contains('/')) { $rel.Substring(0, $rel.LastIndexOf('/') + 1) } else { '' }
     $node.thumb = $dir + $thumb.Name
   }
+  Add-Owner $node $rel
   $script:count++
   $node
 }
@@ -80,6 +88,9 @@ function Read-Folder($dirPath, $rel, $name) {
 function Get-Manifest {
   if (-not (Test-Path -LiteralPath $Games)) { New-Item -ItemType Directory -Path $Games | Out-Null }
   $script:count = 0
+  $script:owners = $null
+  $ownersPath = Join-Path $Root '.pp-owners.json'
+  if (Test-Path -LiteralPath $ownersPath) { try { $script:owners = [IO.File]::ReadAllText($ownersPath) | ConvertFrom-Json } catch { } }
   $tree = Read-Folder $Games '' 'Playables'
   $m = [ordered]@{ generatedAt = (Get-Ms (Get-Date)); count = $script:count; root = $tree }
   ConvertTo-Json $m -Depth 60 -Compress

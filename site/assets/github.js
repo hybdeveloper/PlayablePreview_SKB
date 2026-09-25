@@ -1,11 +1,13 @@
-/* Minimal GitHub REST client for edit mode. Every change (upload, rename) is a
- * single commit built with the Git Data API, so one change = one deploy.
+/* Minimal GitHub REST client for edit mode. Every change (upload, rename, delete)
+ * is a single commit built with the Git Data API, so one change = one deploy.
  * The token never leaves this browser except to api.github.com. */
 (function (root) {
   'use strict';
 
   const API = 'https://api.github.com';
+  const SODIUM = 'https://cdn.jsdelivr.net/npm/libsodium-wrappers@0.7.15/+esm';
   const enc = p => p.split('/').map(encodeURIComponent).join('/');
+  const under = (p, d) => p === d || p.startsWith(d + '/');
 
   async function call(token, method, path, body) {
     const res = await fetch(API + path, {
@@ -26,7 +28,8 @@
       err.status = res.status;
       throw err;
     }
-    return res.status === 204 ? null : res.json();
+    const text = await res.text(); // 201/204 from the secrets API have no body
+    return text ? JSON.parse(text) : null;
   }
 
   const base = repo => `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`;
@@ -45,19 +48,37 @@
     });
   }
 
+  // Small JSON file in the repo at commit `ref`; null when it does not exist.
+  async function readJson(token, repo, path, ref) {
+    try {
+      const f = await call(token, 'GET', `${base(repo)}/contents/${enc(path)}?ref=${ref}`);
+      const bytes = Uint8Array.from(atob(f.content.replace(/\s/g, '')), c => c.charCodeAt(0));
+      return JSON.parse(new TextDecoder().decode(bytes));
+    } catch (e) {
+      if (e.status === 404) return null;
+      throw e;
+    }
+  }
+
   // makeEntries(listTree) returns the tree entries to apply on top of the branch
-  // head. Retried once if the branch moved while we were committing.
-  async function commitTree(token, repo, message, makeEntries) {
+  // head. meta = { path, update(json) } rewrites a JSON file in the same commit
+  // (the uploader list). Retried once if the branch moved while we were committing.
+  async function commitTree(token, repo, message, makeEntries, meta) {
     const R = base(repo);
     for (let attempt = 0; ; attempt++) {
       const ref = await call(token, 'GET', `${R}/git/ref/heads/${enc(repo.branch)}`);
       const head = await call(token, 'GET', `${R}/git/commits/${ref.object.sha}`);
       const listTree = async () => {
         const t = await call(token, 'GET', `${R}/git/trees/${head.tree.sha}?recursive=1`);
-        if (t.truncated) throw new Error('Repository is too large to list; rename it with git instead');
+        if (t.truncated) throw new Error('Repository is too large to list; change it with git instead');
         return t.tree;
       };
-      const tree = await call(token, 'POST', `${R}/git/trees`, { base_tree: head.tree.sha, tree: await makeEntries(listTree) });
+      const entries = await makeEntries(listTree);
+      if (meta) {
+        const next = meta.update((await readJson(token, repo, meta.path, ref.object.sha)) || {});
+        entries.push({ path: meta.path, mode: '100644', type: 'blob', content: JSON.stringify(next, null, 1) + '\n' });
+      }
+      const tree = await call(token, 'POST', `${R}/git/trees`, { base_tree: head.tree.sha, tree: entries });
       const commit = await call(token, 'POST', `${R}/git/commits`, { message, tree: tree.sha, parents: [ref.object.sha] });
       try {
         await call(token, 'PATCH', `${R}/git/refs/heads/${enc(repo.branch)}`, { sha: commit.sha });
@@ -69,7 +90,7 @@
   }
 
   // files: [{ path: repo path, file: File }]
-  async function upload(token, repo, files, message, onProgress) {
+  async function upload(token, repo, files, message, onProgress, meta) {
     const entries = [];
     for (let i = 0; i < files.length; i++) {
       onProgress && onProgress(i, files.length, files[i].path);
@@ -77,14 +98,13 @@
       entries.push({ path: files[i].path, mode: '100644', type: 'blob', sha: blob.sha });
     }
     onProgress && onProgress(files.length, files.length, 'Committing…');
-    return commitTree(token, repo, message, async () => entries);
+    return commitTree(token, repo, message, async () => [...entries], meta);
   }
 
   // moves: [{ from, to }] repo paths; a path moves the file or everything under the folder.
-  async function move(token, repo, moves, message) {
+  async function move(token, repo, moves, message, meta) {
     return commitTree(token, repo, message, async listTree => {
       const all = (await listTree()).filter(e => e.type === 'blob');
-      const under = (p, d) => p === d || p.startsWith(d + '/');
       const out = [];
       for (const { from, to } of moves) {
         if (all.some(e => under(e.path, to))) throw new Error(`"${to.split('/').pop()}" already exists`);
@@ -96,7 +116,21 @@
         }
       }
       return out;
-    });
+    }, meta);
+  }
+
+  // paths: repo paths; a path deletes the file or everything under the folder.
+  async function remove(token, repo, paths, message, meta) {
+    return commitTree(token, repo, message, async listTree => {
+      const all = (await listTree()).filter(e => e.type === 'blob');
+      const out = [];
+      for (const p of paths) {
+        const hits = all.filter(e => under(e.path, p));
+        if (!hits.length) throw new Error(`"${p}" was not found in the repository`);
+        for (const e of hits) out.push({ path: e.path, mode: e.mode, type: 'blob', sha: null });
+      }
+      return out;
+    }, meta);
   }
 
   // Commits on the branch that the published build (repo.commit) does not have yet.
@@ -117,5 +151,16 @@
     return call(token, 'POST', `${base(repo)}/actions/workflows/${encodeURIComponent(repo.workflow || 'deploy.yml')}/dispatches`, { ref: repo.branch });
   }
 
-  root.PPGitHub = { checkAccess, upload, move, unpublished, publish };
+  // Writes an Actions secret. GitHub requires it sealed with the repo's public key
+  // (libsodium sealed box), loaded only when an owner saves the user list.
+  async function setSecret(token, repo, name, value) {
+    const sodium = (await import(SODIUM)).default;
+    await sodium.ready;
+    const { key, key_id } = await call(token, 'GET', `${base(repo)}/actions/secrets/public-key`);
+    const b64 = sodium.base64_variants.ORIGINAL;
+    const sealed = sodium.crypto_box_seal(sodium.from_string(value), sodium.from_base64(key, b64));
+    await call(token, 'PUT', `${base(repo)}/actions/secrets/${encodeURIComponent(name)}`, { encrypted_value: sodium.to_base64(sealed, b64), key_id });
+  }
+
+  root.PPGitHub = { checkAccess, upload, move, remove, unpublished, publish, setSecret };
 })(self);

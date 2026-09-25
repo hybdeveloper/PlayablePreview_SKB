@@ -42,6 +42,10 @@
     edit: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
     upload: 'M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z',
     folderUp: 'M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-8 3 4 4h-3v4h-2v-4H8l4-4z',
+    fullscreenExit: 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z',
+    trash: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
+    people: 'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
+    add: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
     more: 'M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[name]}"/></svg>`;
@@ -119,6 +123,8 @@
     access: null,
     user: null,
     gh: store.get('gh', null),    // { token, login } for edit mode
+    role: null,                   // owner | admin | editor | viewer (from the login)
+    config: null,                 // owners only: the PREVIEW_ACCESS JSON, for the user manager
     openCta: store.get('openCta', true),
     pendingUpload: null,
   };
@@ -318,6 +324,7 @@
       <dt>Size</dt><dd>${fmtSize(g.size)}</dd>
       <dt>Modified</dt><dd>${new Date(g.modified).toLocaleString()}</dd>
       <dt>Folder</dt><dd><a href="${href.folder(folder)}">${esc(folder || state.manifest.root.name)}</a></dd>
+      ${g.owner ? `<dt>Uploaded by</dt><dd>${esc(g.owner)}</dd>` : ''}
       ${g.description ? `<dt>Notes</dt><dd>${esc(g.description)}</dd>` : ''}`;
     els.log.innerHTML = '';
     renderChecks(g, null);
@@ -333,8 +340,28 @@
     state.loadToken++;
     if (state.frameEl) { state.frameEl.remove(); state.frameEl = null; }
     els.player.hidden = true;
+    setFullscreen(false);
     document.body.classList.remove('playing', 'panel-open');
     document.title = 'Playable Preview';
+  }
+
+  // Real fullscreen where the browser allows it on an element; iPhone Safari only
+  // allows it for <video>, so there the stage fills the window instead.
+  const fullscreenEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+  const isFullscreen = () => !!fullscreenEl() || document.body.classList.contains('pseudo-full');
+  function setFullscreen(on) {
+    const pseudo = v => { document.body.classList.toggle('pseudo-full', v); layout(); };
+    if (!on) {
+      if (fullscreenEl()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      pseudo(false);
+      return;
+    }
+    const req = els.stage.requestFullscreen || els.stage.webkitRequestFullscreen;
+    if (!req) return pseudo(true);
+    try {
+      const p = req.call(els.stage);
+      if (p && p.catch) p.catch(() => pseudo(true));
+    } catch { pseudo(true); }
   }
 
   function leavePlayer() {
@@ -566,10 +593,8 @@
     $('#pBack').addEventListener('click', leavePlayer);
     $('#pReload').addEventListener('click', () => { loadGame(); toast('Reloaded'); });
     $('#pRotate').addEventListener('click', rotate);
-    $('#pFull').addEventListener('click', () => {
-      if (document.fullscreenElement) document.exitFullscreen();
-      else if (els.stage.requestFullscreen) els.stage.requestFullscreen().catch(() => toast('Fullscreen not available'));
-    });
+    $('#pFull').addEventListener('click', () => setFullscreen(!isFullscreen()));
+    $('#pExitFull').addEventListener('click', () => setFullscreen(false));
     $('#pCopy').addEventListener('click', () => {
       navigator.clipboard.writeText(location.href).then(() => toast('Preview link copied'), () => window.prompt('Copy link', location.href));
     });
@@ -598,7 +623,8 @@
     document.addEventListener('keydown', e => {
       if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
       if (state.current) {
-        if (e.key === 'Escape' && !document.fullscreenElement) leavePlayer();
+        if (e.key === 'Escape' && document.body.classList.contains('pseudo-full')) setFullscreen(false);
+        else if (e.key === 'Escape' && !fullscreenEl()) leavePlayer();
         else if (e.key === 'r' || e.key === 'R') loadGame();
         else if (e.key === 'o' || e.key === 'O') rotate();
       } else if (e.key === '/') {
@@ -617,6 +643,29 @@
   // [skip ci]: web edits don't rebuild the site; the Publish button does.
   const byline = () => (state.user ? ` (by ${state.user} via Playable Preview)` : ' (via Playable Preview)') + '\n\n[skip ci]';
 
+  // Roles are enforced here in the page only: every non-viewer holds the same repo token.
+  const ROLES = {
+    owner: { label: 'Owner', desc: 'Everything, including renaming/deleting folders and managing users' },
+    admin: { label: 'Admin', desc: 'Upload, rename and delete any playable; cannot change folders or users' },
+    editor: { label: 'Editor', desc: 'Upload; rename and delete only the playables they uploaded' },
+    viewer: { label: 'Viewer', desc: 'View only' },
+  };
+  // Without passwords, editing means pasting a token that can do anything anyway: owner.
+  const role = () => (!isEditing() ? 'viewer' : state.protected ? state.role || 'viewer' : 'owner');
+  const canUpload = () => role() !== 'viewer';
+  function canChange(node) { // rename or delete
+    if (!node || !node.path) return false;
+    const r = role();
+    if (node.type === 'folder') return r === 'owner';
+    return r === 'owner' || r === 'admin' || (r === 'editor' && !!state.user && node.owner === state.user);
+  }
+  const under = (p, d) => p === d || p.startsWith(d + '/');
+  // Who uploaded what: .pp-owners.json next to the games folder, keyed by path inside it.
+  const ownersMeta = fn => ({
+    path: [parentPath(state.manifest.repo.games || ''), '.pp-owners.json'].filter(Boolean).join('/'),
+    update: o => { fn(o); return o; },
+  });
+
   function moreBtn(node) {
     return isEditing() && node.path
       ? `<button class="more-btn" data-menu="${esc(node.path)}" data-type="${node.type}" aria-label="More actions">${icon('more')}</button>`
@@ -629,7 +678,7 @@
     // manual token dialog is only offered on sites without passwords.
     $('#editBtn').hidden = !repo || (state.protected && !isEditing());
     $('#editBtn').classList.toggle('on', isEditing());
-    $('#editActions').hidden = !isEditing() || state.route.name !== 'folder' || !!state.query.trim();
+    $('#editActions').hidden = !canUpload() || state.route.name !== 'folder' || !!state.query.trim();
     document.body.classList.toggle('editing', isEditing());
   }
 
@@ -639,16 +688,18 @@
     const first = $('#modalCard input:not([type=hidden])');
     if (first) setTimeout(() => { first.focus(); first.select && first.select(); }, 0);
   }
-  const closeModal = () => { $('#modal').hidden = true; $('#modalCard').innerHTML = ''; };
+  const closeModal = () => { $('#modal').hidden = true; $('#modalCard').innerHTML = ''; $('#modalCard').classList.remove('wide'); };
 
   function openConnect() {
     const r = state.manifest.repo;
     const repoName = `${r.owner}/${r.name}`;
     if (state.gh && state.gh.fromLogin) {
+      const r = ROLES[role()];
       modal(`<h2>${icon('edit')}Edit mode</h2>
-        <p>Your account <b>${esc(state.user)}</b> can edit <b>${esc(repoName)}</b>.</p>
-        <p class="muted">Use the ⋮ button on any item to rename it, or the upload buttons / drag &amp; drop in a folder. Each change is one commit; the site redeploys in about a minute.</p>
-        <div class="modal-actions"><button class="pill-btn primary" data-act="close">Done</button></div>`);
+        <p>You are signed in as <b>${esc(state.user)}</b> <em class="role">${r.label}</em></p>
+        <p>${esc(r.desc)}.</p>
+        <p class="muted">Right-click an item (or use its ⋮ button) to rename or delete it; use the upload buttons or drop files anywhere on a folder page. Changes are saved on GitHub and go live when you press Publish.</p>
+        <div class="modal-actions">${state.config ? `<button class="pill-btn" data-act="users">${icon('people')}Manage users</button>` : ''}<button class="pill-btn primary" data-act="close">Done</button></div>`);
       return;
     }
     if (state.gh) {
@@ -690,7 +741,8 @@
     menu.innerHTML = `<button data-act="open">${icon(node.type === 'folder' ? 'folder' : 'play')}Open</button>
       <button data-act="newtab">${icon('openNew')}Open in new tab</button>
       <button data-act="copy">${icon('link')}Copy link</button>
-      ${isEditing() && node.path ? `<hr><button data-act="rename">${icon('edit')}Rename</button>` : ''}`;
+      ${canChange(node) ? `<hr><button data-act="rename">${icon('edit')}Rename</button>
+        <button data-act="delete" class="danger">${icon('trash')}Delete</button>` : ''}`;
     menu.dataset.path = node.path;
     menu.dataset.type = node.type;
     menu.hidden = false;
@@ -722,7 +774,7 @@
     newBase = newBase.trim();
     if (!newBase || /[\\/:*?"<>|]/.test(newBase) || newBase === '.' || newBase === '..') throw new Error('Name cannot be empty or contain \\ / : * ? " < > |');
     const isFile = node.type === 'game' && node.kind === 'file';
-    const [oldBase, ext] = isFile ? splitExt(node.name) : [node.name, ''];
+    const ext = isFile ? splitExt(node.name)[1] : '';
     const newName = newBase + ext;
     if (newName === node.name) return null;
     const dir = parentPath(node.path);
@@ -730,14 +782,38 @@
     const parent = state.folders.get(dir);
     if (parent && parent.children.some(c => c !== node && c.name.toLowerCase() === newName.toLowerCase())) throw new Error(`"${newName}" already exists here`);
 
-    const moves = [{ from: repoPath(node.path), to: repoPath(sibling(newName)) }];
-    // A single-file game's thumbnail shares its base name ("Foo.html" + "Foo.png"): keep them paired.
-    if (isFile && node.thumb && parentPath(node.thumb) === dir) {
-      const [thumbBase, thumbExt] = splitExt(node.thumb.split('/').pop());
-      if (thumbBase === oldBase) moves.push({ from: repoPath(node.thumb), to: repoPath(sibling(newBase + thumbExt)) });
-    }
+    const moves = [{ from: node.path, to: sibling(newName) }];
+    const thumb = pairedThumb(node);
+    if (thumb) moves.push({ from: thumb, to: sibling(newBase + splitExt(thumb)[1]) });
+    const meta = ownersMeta(o => {
+      for (const m of moves) for (const k of Object.keys(o)) if (under(k, m.from)) { o[m.to + k.slice(m.from.length)] = o[k]; delete o[k]; }
+    });
     const msg = `Rename ${node.path} → ${newName}`;
-    await PPGitHub.move(state.gh.token, state.manifest.repo, moves, msg + byline());
+    await PPGitHub.move(state.gh.token, state.manifest.repo, moves.map(m => ({ from: repoPath(m.from), to: repoPath(m.to) })), msg + byline(), meta);
+    return msg;
+  }
+
+  // A single-file game's thumbnail shares its base name ("Foo.html" + "Foo.png"): keep them paired.
+  function pairedThumb(node) {
+    if (node.type !== 'game' || node.kind !== 'file' || !node.thumb || parentPath(node.thumb) !== parentPath(node.path)) return null;
+    return splitExt(node.thumb.split('/').pop())[0] === splitExt(node.name)[0] ? node.thumb : null;
+  }
+
+  function openDelete(node) {
+    const n = node.type === 'folder' ? countGames(node) : 0;
+    modal(`<h2>${icon('trash')}Delete ${node.type === 'folder' ? 'folder' : 'playable'}?</h2>
+      <p><b>${esc(node.path)}</b>${node.type === 'folder' ? ` and everything in it (${n} playable${n === 1 ? '' : 's'})` : ''} will be removed from the repository.</p>
+      <p class="muted small">It stays in the git history, so it can still be restored with git.</p>
+      <div class="form-error" id="delError"></div>
+      <div class="modal-actions"><button class="pill-btn" data-act="close">Cancel</button><button class="pill-btn danger" data-act="delete" data-path="${esc(node.path)}" data-type="${node.type}">Delete</button></div>`);
+  }
+
+  async function doDelete(node) {
+    if (!canChange(node)) throw new Error('You do not have permission to delete this');
+    const paths = [node.path, pairedThumb(node)].filter(Boolean);
+    const meta = ownersMeta(o => { for (const k of Object.keys(o)) if (paths.some(p => under(k, p))) delete o[k]; });
+    const msg = `Delete ${node.path}`;
+    await PPGitHub.remove(state.gh.token, state.manifest.repo, paths.map(repoPath), msg + byline(), meta);
     return msg;
   }
 
@@ -748,16 +824,22 @@
     const folder = state.route.name === 'folder' ? state.route.path : '';
     const total = items.reduce((s, i) => s + i.file.size, 0);
     const tooBig = items.filter(i => i.file.size > MAX_UPLOAD_BYTES);
+    // Replacing a playable counts as changing it: editors may only replace their own.
+    const taken = [...new Set(items.map(i => {
+      const p = [folder, i.rel].filter(Boolean).join('/');
+      return [...state.games.values()].find(g => (g.kind === 'file' ? g.path === p : under(p, g.path)));
+    }).filter(g => g && !canChange(g)))];
     state.pendingUpload = { folder, items };
     modal(`<h2>${icon('upload')}Upload ${items.length} file${items.length > 1 ? 's' : ''}</h2>
       <p>To <b>${esc(folder || state.manifest.root.name)}</b> · ${fmtSize(total)}</p>
       <ul class="file-list">${items.slice(0, 8).map(i => `<li>${htmlIcon}<span>${esc(i.rel)}</span><small>${fmtSize(i.file.size)}</small></li>`).join('')}
         ${items.length > 8 ? `<li class="muted">+ ${items.length - 8} more</li>` : ''}</ul>
       ${tooBig.length ? `<div class="form-error">${tooBig.length} file(s) exceed GitHub's 100 MB limit: ${esc(tooBig.map(i => i.rel).join(', '))}</div>` : ''}
+      ${taken.length ? `<div class="form-error">You cannot replace playables uploaded by someone else: ${esc(taken.map(g => g.name + (g.owner ? ` (${g.owner})` : '')).join(', '))}</div>` : ''}
       <p class="muted small">Files with the same name are replaced. A folder containing index.html becomes one playable.</p>
       <div class="progress" id="upProgress" hidden><div></div><span></span></div>
       <div class="form-error" id="upError"></div>
-      <div class="modal-actions"><button class="pill-btn" data-act="close">Cancel</button><button class="pill-btn primary" data-act="upload" ${tooBig.length ? 'disabled' : ''}>Upload</button></div>`);
+      <div class="modal-actions"><button class="pill-btn" data-act="close">Cancel</button><button class="pill-btn primary" data-act="upload" ${tooBig.length || taken.length ? 'disabled' : ''}>Upload</button></div>`);
   }
 
   async function doUpload() {
@@ -766,10 +848,11 @@
     bar.hidden = false;
     const files = items.map(i => ({ path: repoPath([folder, i.rel].filter(Boolean).join('/')), file: i.file }));
     const msg = `Upload ${items.length} file${items.length > 1 ? 's' : ''} to ${folder || '/'}`;
+    const meta = state.user ? ownersMeta(o => { for (const i of items) o[[folder, i.rel].filter(Boolean).join('/')] = state.user; }) : undefined;
     await PPGitHub.upload(state.gh.token, state.manifest.repo, files, msg + byline(), (i, n, name) => {
       bar.querySelector('div').style.width = Math.round((i / n) * 100) + '%';
       bar.querySelector('span').textContent = i < n ? `${i + 1}/${n} · ${name.split('/').pop()}` : name;
-    });
+    }, meta);
     return msg;
   }
 
@@ -789,6 +872,81 @@
     };
     for (const e of entries) await walk(e, '');
     return out;
+  }
+
+  /* ---------- user manager (owners): rewrites the PREVIEW_ACCESS secret ---------- */
+
+  const listText = v => (Array.isArray(v) ? v : [v == null ? '*' : v]).map(f => f || '*').join(', ');
+  const splitList = s => s.split(',').map(x => x.trim().replace(/^\/+|\/+$/g, '')).filter(Boolean);
+
+  function userRowHTML(u) {
+    const r = ROLES[u.role] ? u.role : u.edit === true ? 'owner' : 'viewer';
+    return `<div class="user-row">
+      <input class="u-name" placeholder="Name" value="${esc(u.name || '')}" required>
+      <input class="u-pass" type="password" placeholder="Password" value="${esc(u.password || '')}" autocomplete="new-password" required>
+      <select class="u-role" aria-label="Role">${Object.keys(ROLES).map(k => `<option value="${k}"${k === r ? ' selected' : ''}>${ROLES[k].label}</option>`).join('')}</select>
+      <input class="u-folders" placeholder="Folders: * or A, B/C" value="${esc(listText(u.folders))}" list="folderList" title="Folders this user can see: * for all, or comma-separated paths">
+      <button type="button" class="icon-btn" data-act="user-del" title="Remove user" aria-label="Remove user">${icon('trash')}</button>
+    </div>`;
+  }
+
+  function openUsers() {
+    const cfg = state.config || { users: [] };
+    modal(`<h2>${icon('people')}Users &amp; permissions</h2>
+      <form id="usersForm" autocomplete="off">
+        <div class="user-head"><span>Name</span><span>Password</span><span>Role</span><span>Folders</span><span></span></div>
+        <div class="users" id="usersList">${(cfg.users || []).map(userRowHTML).join('')}</div>
+        <button type="button" class="pill-btn" data-act="user-add">${icon('add')}Add user</button>
+        <label class="switch small"><input type="checkbox" id="showPass"><span></span>Show passwords</label>
+        <label class="field">Public folders (no password needed)<input id="uPublic" value="${esc((cfg.public || []).join(', '))}" placeholder="None" list="folderList"></label>
+        <datalist id="folderList"><option value="*">${[...state.folders.keys()].filter(Boolean).map(p => `<option value="${esc(p)}">`).join('')}</datalist>
+        <dl class="role-help">${Object.values(ROLES).map(r => `<dt>${r.label}</dt><dd>${esc(r.desc)}</dd>`).join('')}</dl>
+        <div class="form-error" id="usersError"></div>
+        <p class="muted small">Saving writes the PREVIEW_ACCESS secret and rebuilds the site (1–2 minutes), which also publishes any unpublished changes. Users whose password changed must sign in again.</p>
+        <div class="modal-actions"><button type="button" class="pill-btn" data-act="close">Cancel</button><button class="pill-btn primary" id="usersBtn">Save &amp; publish</button></div>
+      </form>`);
+    $('#modalCard').classList.add('wide');
+    $('#showPass').addEventListener('change', e => document.querySelectorAll('.u-pass').forEach(i => { i.type = e.target.checked ? 'text' : 'password'; }));
+  }
+
+  function addUserRow() {
+    $('#usersList').insertAdjacentHTML('beforeend', userRowHTML({ role: 'viewer', folders: ['*'] }));
+    const row = $('#usersList').lastElementChild;
+    if ($('#showPass').checked) row.querySelector('.u-pass').type = 'text';
+    row.querySelector('.u-name').focus();
+  }
+
+  async function saveUsers() {
+    const btn = $('#usersBtn'), err = $('#usersError');
+    const users = [...document.querySelectorAll('.user-row')].map(r => ({
+      name: r.querySelector('.u-name').value.trim(),
+      password: r.querySelector('.u-pass').value,
+      role: r.querySelector('.u-role').value,
+      folders: splitList(r.querySelector('.u-folders').value).length ? splitList(r.querySelector('.u-folders').value) : ['*'],
+    }));
+    const problem =
+      users.find(u => !u.name || !u.password) ? 'Every user needs a name and a password' :
+      new Set(users.map(u => u.password)).size < users.length ? 'Two users have the same password; passwords identify users, so each must be unique' :
+      new Set(users.map(u => u.name.toLowerCase())).size < users.length ? 'Two users have the same name' :
+      !users.some(u => u.role === 'owner' && u.folders.includes('*')) ? 'Keep at least one Owner with access to all folders (*)' : '';
+    if (problem) { err.textContent = problem; return; }
+    // Keep other settings (salt, editToken, …) and drop the legacy per-user "edit" flag.
+    const cfg = { ...state.config, public: splitList($('#uPublic').value), users };
+    btn.disabled = true;
+    err.textContent = '';
+    try {
+      await PPGitHub.setSecret(state.gh.token, state.manifest.repo, 'PREVIEW_ACCESS', JSON.stringify(cfg, null, 2));
+      await PPGitHub.publish(state.gh.token, state.manifest.repo);
+      state.config = cfg;
+      closeModal();
+      toast('Users saved');
+      awaitDeploy();
+    } catch (e) {
+      err.textContent = e.status === 403 || e.status === 404
+        ? `${e.message} — the edit token needs “Secrets: Read and write” and “Actions: Read and write” on this repository.`
+        : e.message;
+      btn.disabled = false;
+    }
   }
 
   function banner(html, kind) {
@@ -893,17 +1051,35 @@
       e.preventDefault();
       openMenu(nodeOf(el.dataset.node, el.dataset.type), { x: e.clientX, y: e.clientY });
     });
-    content.addEventListener('dragover', e => {
-      if (!isEditing() || state.route.name !== 'folder' || ![...e.dataTransfer.types].includes('Files')) return;
+    // Files dropped anywhere on a folder page upload into that folder. Always swallow
+    // file drops so a miss does not make the browser navigate to the file.
+    const dropHint = $('#dropHint');
+    let dragDepth = 0;
+    const isFileDrag = e => [...e.dataTransfer.types].includes('Files');
+    const dropTarget = () => (state.route.name === 'folder' && !state.current && !state.query.trim() && $('#modal').hidden ? state.route.path : null);
+    const endDrag = () => { dragDepth = 0; dropHint.hidden = true; };
+    document.addEventListener('dragenter', e => {
+      if (!isFileDrag(e)) return;
       e.preventDefault();
-      content.classList.add('drop');
+      if (dragDepth++ || dropTarget() == null) return;
+      closeMenu();
+      dropHint.innerHTML = canUpload()
+        ? `<div>${icon('upload')}<b>Drop to upload</b><span>to ${esc(dropTarget() || state.manifest.root.name)}</span></div>`
+        : `<div>${icon('lock')}<b>Uploading needs edit rights</b><span>${state.protected ? 'Sign in with an owner, admin or editor account' : 'Turn on edit mode first'}</span></div>`;
+      dropHint.classList.toggle('denied', !canUpload());
+      dropHint.hidden = false;
     });
-    content.addEventListener('dragleave', e => { if (!content.contains(e.relatedTarget)) content.classList.remove('drop'); });
-    content.addEventListener('drop', async e => {
-      if (!content.classList.contains('drop')) return;
+    document.addEventListener('dragleave', () => { if (dragDepth && --dragDepth <= 0) endDrag(); });
+    document.addEventListener('dragover', e => {
+      if (!isFileDrag(e)) return;
       e.preventDefault();
-      content.classList.remove('drop');
-      openUpload(await filesFromDrop(e.dataTransfer));
+      e.dataTransfer.dropEffect = canUpload() && dropTarget() != null ? 'copy' : 'none';
+    });
+    document.addEventListener('drop', async e => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      endDrag();
+      if (canUpload() && dropTarget() != null) openUpload(await filesFromDrop(e.dataTransfer));
     });
 
     $('#menu').addEventListener('click', e => {
@@ -916,6 +1092,7 @@
       if (b.dataset.act === 'open') location.hash = nodeHref(node);
       if (b.dataset.act === 'newtab') window.open(absUrl(nodeHref(node)), '_blank', 'noopener');
       if (b.dataset.act === 'rename') openRename(node);
+      if (b.dataset.act === 'delete') openDelete(node);
       if (b.dataset.act === 'copy') {
         const link = absUrl(nodeHref(node));
         navigator.clipboard.writeText(link).then(() => toast('Link copied'), () => window.prompt('Copy link', link));
@@ -932,6 +1109,10 @@
       if (b.dataset.act === 'close') closeModal();
       if (b.dataset.act === 'disconnect') { state.gh = null; store.set('gh', null); closeModal(); renderEditUI(); renderMain(); toast('Edit mode off'); }
       if (b.dataset.act === 'upload') runAction(b, $('#upError'), doUpload);
+      if (b.dataset.act === 'delete') runAction(b, $('#delError'), () => doDelete(nodeOf(b.dataset.path, b.dataset.type)));
+      if (b.dataset.act === 'users') openUsers();
+      if (b.dataset.act === 'user-add') addUserRow();
+      if (b.dataset.act === 'user-del') b.closest('.user-row').remove();
     });
     $('#modal').addEventListener('submit', async e => {
       e.preventDefault();
@@ -949,6 +1130,7 @@
           btn.disabled = false;
         }
       }
+      if (e.target.id === 'usersForm') saveUsers();
       if (e.target.id === 'renameForm') {
         const f = e.target;
         const node = f.dataset.type === 'folder' ? state.folders.get(f.dataset.path) : state.games.get(f.dataset.path);
@@ -984,7 +1166,7 @@
     if (!state.protected) return;
     box.innerHTML = state.user
       ? `<span class="avatar" style="--h:${hue(state.user)}">${esc(state.user.trim()[0] || '?').toUpperCase()}</span>
-         <span class="acc-name">${esc(state.user)}${state.gh && state.gh.fromLogin ? ' <em class="role">Editor</em>' : ''}</span>
+         <span class="acc-name">${esc(state.user)}${state.role && state.role !== 'viewer' ? ` <em class="role">${ROLES[state.role].label}</em>` : ''}</span>
          <button class="icon-btn" id="logout" title="Sign out" aria-label="Sign out">${icon('logout')}</button>`
       : `<button class="signin-btn" id="signin">${icon('lock')}Sign in</button>`;
   }
@@ -1058,7 +1240,9 @@
     if (key && !payload) await PPShared.clearKey(); // password removed or changed
     if (payload) {
       state.user = payload.name;
-      // Editors get the shared repo token inside their (password-encrypted) payload.
+      state.role = ROLES[payload.role] ? payload.role : payload.edit ? 'owner' : 'viewer'; // older builds: edit = owner
+      state.config = state.role === 'owner' ? payload.config || null : null;
+      // Non-viewers get the shared repo token inside their (password-encrypted) payload.
       state.gh = payload.edit ? { token: payload.edit.token, login: payload.name, fromLogin: true } : null;
       return payload.manifest;
     }
