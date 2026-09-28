@@ -56,12 +56,14 @@ Mở http://localhost:5173 . Thêm/sửa game rồi **F5** là thấy ngay.
 
 Quyền sửa gắn với **mật khẩu đăng nhập**: mỗi người trong `PREVIEW_ACCESS` có một `role`:
 
-| Role | Upload | Đổi tên / xoá game | Đổi tên / xoá thư mục | Quản lý tài khoản |
-|---|---|---|---|---|
-| `owner` | ✓ | mọi game | ✓ | ✓ |
-| `admin` | ✓ | mọi game | ✗ | ✗ |
-| `editor` | ✓ | chỉ game **mình upload** | ✗ | ✗ |
-| `viewer` (mặc định) | ✗ | ✗ | ✗ | ✗ |
+| Role | Tải xuống | Upload | Đổi tên / xoá game | Đổi tên / xoá thư mục | Quản lý tài khoản |
+|---|---|---|---|---|---|
+| `owner` | ✓ | ✓ | mọi game | ✓ | ✓ |
+| `admin` | ✓ | ✓ | mọi game | ✗ | ✗ |
+| `editor` | ✓ | ✓ | chỉ game **mình upload** | ✗ | ✗ |
+| `viewer` (mặc định) | ✓ | ✗ | ✗ | ✗ | ✗ |
+
+**Tải xuống** (menu ⋮ / chuột phải → *Download*, hoặc nút ⬇ trong player) mở cho mọi role, kể cả khách chưa đăng nhập với thư mục public — ai xem được game nào thì tải được game đó. Game 1 file tải về file `.html`; game dạng thư mục (index.html) tải về `.zip`.
 
 Người sửa **không cần tài khoản GitHub**: mọi thao tác được commit bằng token của chủ repo, commit ghi rõ tên người làm. Người upload mỗi file được lưu trong `.pp-owners.json` (cạnh thư mục `games/`); game đưa lên bằng git thường không có người upload nên chỉ owner/admin sửa được. Cấu hình cũ `"edit": true` được hiểu là `owner`.
 

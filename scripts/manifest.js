@@ -123,14 +123,18 @@ function buildManifest(gamesDir) {
 
   const fileInfo = rel => ({ size: src.size(rel), modified: dates.get(path.join(root, rel)) || src.mtime(rel) });
 
-  function walkFiles(rel) {
+  // files: paths inside the game folder, so the page can zip it for download.
+  function walkFiles(rel, prefix = '') {
     let size = 0, modified = 0;
+    const files = [];
     for (const e of src.list(rel)) {
-      const info = e.dir ? walkFiles(join(rel, e.name)) : fileInfo(join(rel, e.name));
+      const sub = prefix + e.name;
+      const info = e.dir ? walkFiles(join(rel, e.name), sub + '/') : fileInfo(join(rel, e.name));
       size += info.size;
       modified = Math.max(modified, info.modified);
+      if (e.dir) files.push(...info.files); else files.push(sub);
     }
-    return { size, modified };
+    return { size, modified, files };
   }
 
   function readMeta(rel) {

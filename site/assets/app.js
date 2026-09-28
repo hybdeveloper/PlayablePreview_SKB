@@ -43,6 +43,7 @@
     upload: 'M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z',
     folderUp: 'M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-8 3 4 4h-3v4h-2v-4H8l4-4z',
     fullscreenExit: 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z',
+    download: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z',
     trash: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
     people: 'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
     add: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
@@ -595,6 +596,7 @@
     $('#pRotate').addEventListener('click', rotate);
     $('#pFull').addEventListener('click', () => setFullscreen(!isFullscreen()));
     $('#pExitFull').addEventListener('click', () => setFullscreen(false));
+    $('#pDownload').addEventListener('click', () => state.current && download(state.current));
     $('#pCopy').addEventListener('click', () => {
       navigator.clipboard.writeText(location.href).then(() => toast('Preview link copied'), () => window.prompt('Copy link', location.href));
     });
@@ -648,7 +650,7 @@
     owner: { label: 'Owner', desc: 'Everything, including renaming/deleting folders and managing users' },
     admin: { label: 'Admin', desc: 'Upload, rename and delete any playable; cannot change folders or users' },
     editor: { label: 'Editor', desc: 'Upload; rename and delete only the playables they uploaded' },
-    viewer: { label: 'Viewer', desc: 'View only' },
+    viewer: { label: 'Viewer', desc: 'View and download only' },
   };
   // Without passwords, editing means pasting a token that can do anything anyway: owner.
   const role = () => (!isEditing() ? 'viewer' : state.protected ? state.role || 'viewer' : 'owner');
@@ -669,8 +671,10 @@
     update: o => { fn(o); return o; },
   });
 
+  // Every role (viewers and signed-out visitors too) can download playables, so the
+  // ⋮ menu shows for all games; folders only have one when there is something to edit.
   function moreBtn(node) {
-    return isEditing() && node.path
+    return node.path && (node.type === 'game' || isEditing())
       ? `<button class="more-btn" data-menu="${esc(node.path)}" data-type="${node.type}" aria-label="More actions">${icon('more')}</button>`
       : '';
   }
@@ -734,6 +738,72 @@
     store.set('gh', state.gh);
   }
 
+  /* ---------- download (every role) ---------- */
+  // Files are fetched from games/ the same way the player loads them, so the service worker
+  // decrypts protected games and fetches remote ones: people can download exactly what they can view.
+  async function fetchGameFile(path) {
+    const res = await fetch('games/' + encodePath(path), { cache: 'no-store' });
+    if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  function saveBlob(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
+  let crcTable;
+  function crc32(bytes) {
+    if (!crcTable) crcTable = Array.from({ length: 256 }, (_, n) => { for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1; return n >>> 0; });
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = crcTable[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+  // Minimal uncompressed ("stored") zip with UTF-8 names.
+  function zip(entries) {
+    const te = new TextEncoder(), parts = [], central = [];
+    let offset = 0;
+    const header = (sig, len) => { const v = new DataView(new ArrayBuffer(len)); v.setUint32(0, sig, true); return v; };
+    for (const { name, data } of entries) {
+      const n = te.encode(name), crc = crc32(data);
+      const loc = header(0x04034b50, 30);
+      loc.setUint16(4, 20, true); loc.setUint16(6, 0x800, true);
+      loc.setUint32(14, crc, true); loc.setUint32(18, data.length, true); loc.setUint32(22, data.length, true);
+      loc.setUint16(26, n.length, true);
+      const cen = header(0x02014b50, 46);
+      cen.setUint16(4, 20, true); cen.setUint16(6, 20, true); cen.setUint16(8, 0x800, true);
+      cen.setUint32(16, crc, true); cen.setUint32(20, data.length, true); cen.setUint32(24, data.length, true);
+      cen.setUint16(28, n.length, true); cen.setUint32(42, offset, true);
+      parts.push(loc, n, data);
+      central.push(cen, n);
+      offset += 30 + n.length + data.length;
+    }
+    const size = central.reduce((s, p) => s + p.byteLength, 0);
+    const end = header(0x06054b50, 22);
+    end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+    end.setUint32(12, size, true); end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, end], { type: 'application/zip' });
+  }
+  async function download(g) {
+    toast(`Preparing ${g.name}…`);
+    try {
+      if (g.kind === 'file') {
+        saveBlob(new Blob([await fetchGameFile(g.path)], { type: 'text/html' }), g.name);
+      } else {
+        const files = g.files && g.files.length ? g.files : ['index.html']; // manifests from older builds list no files
+        const entries = [];
+        for (const f of files) entries.push({ name: `${g.name}/${f}`, data: await fetchGameFile(`${g.path}/${f}`) });
+        saveBlob(zip(entries), g.name + '.zip');
+      }
+      toast(`Downloaded ${g.name}`);
+    } catch (e) {
+      toast(`Could not download ${g.name} (${e.message})`);
+    }
+  }
+
   const nodeOf = (path, type) => (type === 'folder' ? state.folders.get(path) : state.games.get(path));
   const nodeHref = node => (node.type === 'folder' ? href.folder(node.path) : href.play(node.path));
 
@@ -744,6 +814,7 @@
     menu.innerHTML = `<button data-act="open">${icon(node.type === 'folder' ? 'folder' : 'play')}Open</button>
       <button data-act="newtab">${icon('openNew')}Open in new tab</button>
       <button data-act="copy">${icon('link')}Copy link</button>
+      ${node.type === 'game' ? `<button data-act="download">${icon('download')}Download</button>` : ''}
       ${canChange(node) ? `<hr><button data-act="rename">${icon('edit')}Rename</button>
         <button data-act="delete" class="danger">${icon('trash')}Delete</button>` : ''}`;
     menu.dataset.path = node.path;
@@ -1278,6 +1349,7 @@
       if (!node) return;
       if (b.dataset.act === 'open') location.hash = nodeHref(node);
       if (b.dataset.act === 'newtab') window.open(absUrl(nodeHref(node)), '_blank', 'noopener');
+      if (b.dataset.act === 'download') download(node);
       if (b.dataset.act === 'rename') openRename(node);
       if (b.dataset.act === 'delete') openDelete(node);
       if (b.dataset.act === 'copy') {
